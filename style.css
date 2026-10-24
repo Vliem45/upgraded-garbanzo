@@ -23,3 +23,13 @@
 .hex-tile img{width:100%;height:100%;object-fit:fill;clip-path:none;pointer-events:none;}
 .hex-tile:active{transform:scale(.985);}
 .hex-level,.hex-tag{z-index:2;}
+
+/* v0.2.2: pointy-top tessellating 4–3–4 hexes, black contours, no pale borders. */
+.hex-landscape{padding:12px 6px 12px;}
+.hex-board{width:100%;max-width:520px;aspect-ratio:1.34;margin-inline:auto;}
+.hex-tile{width:25.75%;height:40%;aspect-ratio:auto;border:0!important;border-radius:0!important;padding:0!important;background:none!important;box-shadow:none!important;overflow:visible;}
+.hex-tile img{display:block;width:100%;height:100%;object-fit:fill;max-width:none;filter:none;clip-path:none;transform:scale(1.018);transform-origin:center;}
+.hex-tile:active{transform:scale(.99)}
+.hex-tile:focus-visible{outline:none;filter:drop-shadow(0 0 3px #fff4b6)}
+.hex-level{right:13%;bottom:15%}
+.hex-tag{left:13%;right:13%;bottom:13%}
