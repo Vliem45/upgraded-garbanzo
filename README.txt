@@ -21,3 +21,12 @@ Spelregels:
 
 Nog niet geïmplementeerd: verkenners, NPC's, militaire gevechten, definitieve gebouwbalans, aparte afbeeldingen en realtime synchronisatie tussen apparaten.
 LET OP: browsergegevens wissen verwijdert mogelijk de spelstand.
+
+
+VERSIE 0.2 — HEXAGONEN
+De 10 bestaande grondstofvelden zijn nu als 2D-geillustreerde hexagons zichtbaar,
+met een elfde dorpshexagon in het midden. De illustraties staan in assets/.
+Tik op de afbeeldingen voor upgrades; de dorpshexagon opent de dorpskern.
+Alle bestaande spelstanden blijven behouden doordat de save-key niet is gewijzigd.
+Upload de vijf bestanden en de gehele assets-map naar dezelfde hoofdmap op GitHub.
+LET OP: browseropslag is lokaal per apparaat/browser. Maak een backup indien nodig.
