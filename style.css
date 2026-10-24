@@ -14,3 +14,12 @@
 .hex-hint{text-align:center;font-size:12px;color:#f8f0d7;margin:0;padding:5px 8px 3px}
 @media(min-width:620px){.hex-board{max-width:520px}}
 @media(max-width:390px){.hex-level{font-size:10px;padding:1px 3px;min-width:19px}.hex-tag{font-size:9px}}
+
+/* v0.2.1 — Hex tiles tessellate edge-to-edge (4 / 3 / 4).
+   Each transparent PNG is cropped to the actual black hex outline. */
+.hex-landscape{padding:12px 5px 12px;}
+.hex-board{width:100%;aspect-ratio:1.3866667;max-width:520px;}
+.hex-tile{width:25%;height:40%;aspect-ratio:auto;overflow:visible;}
+.hex-tile img{width:100%;height:100%;object-fit:fill;clip-path:none;pointer-events:none;}
+.hex-tile:active{transform:scale(.985);}
+.hex-level,.hex-tag{z-index:2;}

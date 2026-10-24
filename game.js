@@ -31,13 +31,13 @@ function renderFields(){
  // Four hexes above, three through the center, four below. Middle tile opens the village.
  const positions=[
   {x:0,y:0,id:0},{x:25,y:0,id:1},{x:50,y:0,id:2},{x:75,y:0,id:3},
-  {x:12.5,y:25,id:4},{x:37.5,y:25,village:true},{x:62.5,y:25,id:5},
-  {x:0,y:50,id:6},{x:25,y:50,id:7},{x:50,y:50,id:8},{x:75,y:50,id:9}
+  {x:12.5,y:30,id:4},{x:37.5,y:30,village:true},{x:62.5,y:30,id:5},
+  {x:0,y:60,id:6},{x:25,y:60,id:7},{x:50,y:60,id:8},{x:75,y:60,id:9}
  ];
  const tiles=positions.map(pos=>{
-  if(pos.village)return `<button class="hex-tile hex-village" style="left:${pos.x}%;top:${pos.y}%" data-open-village aria-label="Open dorpskern"><img src="assets/village.jpg" alt="Dorp" draggable="false"><span class="hex-tag">🏰 Dorp</span></button>`;
+  if(pos.village)return `<button class="hex-tile hex-village" style="left:${pos.x}%;top:${pos.y}%" data-open-village aria-label="Open dorpskern"><img src="assets/village.png" alt="Dorp" draggable="false"><span class="hex-tag">🏰 Dorp</span></button>`;
   const f=state.fields[pos.id],busy=state.queue?.kind==='field'&&state.queue.id===f.id;
-  return `<button class="hex-tile ${busy?'hex-busy':''}" style="left:${pos.x}%;top:${pos.y}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} niveau ${f.level}"><img src="assets/${f.type}.jpg" alt="${TYPES[f.type].name}" draggable="false"><span class="hex-level">${busy?'🔨 ':''}${f.level}</span></button>`;
+  return `<button class="hex-tile ${busy?'hex-busy':''}" style="left:${pos.x}%;top:${pos.y}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} niveau ${f.level}"><img src="assets/${f.type}.png" alt="${TYPES[f.type].name}" draggable="false"><span class="hex-level">${busy?'🔨 ':''}${f.level}</span></button>`;
  }).join('');
  return `<div class="scene-head"><div><h1>De landerijen</h1><p>Tik op een hexagon om te verbeteren</p></div><span class="pill">10 velden</span></div><section class="hex-landscape"><div class="hex-board">${tiles}</div><p class="hex-hint">Tik op het dorp in het midden om naar de dorpskern te gaan.</p></section><div class="info-strip"><span>🏡 Basisproductie +25/u</span><span>🔨 Eén bouwproject tegelijk</span></div>`;
 }
