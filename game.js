@@ -117,7 +117,7 @@ function plotArt(type){
   return type==='warehouse'?'assets/warehouse-v050.png'
     :type==='granary'?'assets/granary-v050.png'
     :type==='barracks'?'assets/barracks-v070.png'
-    :type==='market'?'assets/market-v080.png'
+    :type==='market'?'assets/market-v081.png'
     :null;
 }
 function renderVillage(){
