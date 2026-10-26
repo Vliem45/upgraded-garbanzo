@@ -122,7 +122,7 @@ function renderVillage(){
   return `<div class="scene-head"><div><h1>De dorpskern</h1><p>Negen vrije bouwplaatsen · plaats je gebouwen zelf</p></div><span class="pill">🏡 Dorp 1</span></div>
   <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
     <img class="village-art" src="${wallBuilt?'assets/village-wall-on-v061.webp':'assets/village-wall-off-v061.webp'}" alt="Dorp met hoofdgebouw en negen genummerde kavels; zonder muur of verzamelplaats" draggable="false">
-    ${rallyBuilt?`<img class="village-rally-overlay" src="assets/rally-v060.png" alt="" draggable="false">`:''}
+    ${rallyBuilt && !wallBuilt?`<img class="village-rally-overlay" src="assets/rally-v060.png" alt="" draggable="false">`:''}
     ${plots}
     <button class="village-main-hotspot" data-building="main" aria-label="Hoofdgebouw verbeteren"><span class="level-badge">${state.buildings.main||1}</span></button>
     <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
