@@ -12,6 +12,7 @@ const ICON={wood:'🪵',clay:'🧱',iron:'⛏️',crop:'🌾'};
 const YIELD=[0,10,15,23,35,53,80,120,180,270,405];
 const now=()=>Date.now();
 const cap=n=>{let v=800;for(let i=2;i<=n;i++)v*=i<5?1.2:i<10?1.3:1.5;return Math.round(v)};
+const storageCap=n=>n>0?cap(n):600;
 const fmt=n=>Math.floor(n).toLocaleString('nl-NL');
 const duration=n=>Math.round(20*Math.pow(1.55,n-1))*1000;
 const initial=()=>({
@@ -19,7 +20,7 @@ const initial=()=>({
   plots:{},
   stock:{wood:200,clay:200,iron:200,crop:200},
   fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),
-  buildings:{main:1,warehouse:1,granary:1},
+  buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0},
   queue:null,
   last:now()
 });
@@ -32,10 +33,12 @@ function load(){
 }
 let state=load(),screen='fields',resourceOpen=null;
 if(!state.plots||typeof state.plots!=='object')state.plots={};
-if(!state.buildings)state.buildings={main:1,warehouse:1,granary:1};
-if(state.buildings.main==null)state.buildings.main=1;
+if(!state.buildings)state.buildings={main:1,warehouse:0,granary:0};
+for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0})){
+  if(state.buildings[id]==null)state.buildings[id]=def;
+}
 
-const availableCap=r=>cap(state.buildings[r==='crop'?'granary':'warehouse']||1);
+const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse']||0);
 function perHour(r){return 25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0)}
 function update(){
   let t=now();
@@ -61,7 +64,8 @@ const BLD={
   granary:{name:'Graanschuur',icon:'🌾',base:[55,60,40,35]},
   wall:{name:'Stadsmuur',icon:'🧱',base:[70,95,80,40]},
   rally:{name:'Verzamelplaats',icon:'🚩',base:[40,55,55,20]},
-  barracks:{name:'Kazerne',icon:'⚔️',base:[100,110,85,65]}
+  barracks:{name:'Kazerne',icon:'⚔️',base:[100,110,85,65]},
+  market:{name:'Marktplaats',icon:'🏪',base:[90,110,70,50]}
 };
 const buildingPrice=(id,lvl)=>BLD[id].base.map(c=>Math.ceil(c*Math.pow(1.3,Math.max(0,lvl-1))));
 const enough=c=>RES.every((r,i)=>state.stock[r]>=c[i]);
@@ -110,7 +114,11 @@ const VILLAGE_PLOTS=[
  {n:7,x:23,y:45},{n:8,x:23,y:29},{n:9,x:35,y:18}
 ];
 function plotArt(type){
-  return type==='warehouse'?'assets/warehouse-v050.png':type==='granary'?'assets/granary-v050.png':type==='barracks'?'assets/barracks-v070.png':null;
+  return type==='warehouse'?'assets/warehouse-v050.png'
+    :type==='granary'?'assets/granary-v050.png'
+    :type==='barracks'?'assets/barracks-v070.png'
+    :type==='market'?'assets/market-v080.png'
+    :null;
 }
 function renderVillage(){
   const rallyBuilt=(state.buildings.rally||0)>0;
@@ -129,39 +137,59 @@ function renderVillage(){
     <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
     <button class="fixed-hotspot fixed-wall ${wallBuilt?'is-built':''}" data-building="wall" aria-label="${wallBuilt?'Stadsmuur verbeteren':'Stadsmuur bouwen'}">${wallBuilt?`<span class="level-badge">${state.buildings.wall||1}</span>`:`<span class="fixed-placeholder">🛡️</span>`}</button>
   </section>
-  <p class="note">🏗️ Tik op een lege bouwplaats om gebouwen te plaatsen. De kazerne wordt ontgrendeld bij hoofdgebouw 3 en verzamelplaats 1. Tik op een geplaatst gebouw of vast onderdeel voor details en upgrades.</p>`;
+  <p class="note">🏗️ Tik op een lege bouwplaats om gebouwen te bouwen of te plaatsen. De marktplaats ontgrendelt bij hoofdgebouw 3. De kazerne ontgrendelt bij hoofdgebouw 3 en verzamelplaats 1.</p>`;
 }
 function barracksReady(){return (state.buildings.main||0)>=3 && (state.buildings.rally||0)>=1;}
-function beginBarracks(plot){
+function marketReady(){return (state.buildings.main||0)>=3;}
+function typeReady(type){
+  if(type==='barracks')return barracksReady();
+  if(type==='market')return marketReady();
+  return true;
+}
+function buildRequirementText(type){
+  if(type==='barracks')return `Vereisten: hoofdgebouw niveau 3 ${(state.buildings.main||0)>=3?'✅':'🔒'} · verzamelplaats niveau 1 ${(state.buildings.rally||0)>=1?'✅':'🔒'}`;
+  if(type==='market')return `Vereiste: hoofdgebouw niveau 3 ${(state.buildings.main||0)>=3?'✅':'🔒'}`;
+  return 'Direct beschikbaar';
+}
+function beginPlacedBuilding(plot,type){
   update();
-  if(!barracksReady()||state.queue||state.plots[plot]||Object.values(state.plots).includes('barracks'))return;
-  const cost=buildingPrice('barracks',1);
+  if(state.queue||state.plots[plot]||Object.values(state.plots).includes(type)||!typeReady(type))return;
+  const cost=buildingPrice(type,1);
   if(!enough(cost))return;
   RES.forEach((r,i)=>state.stock[r]-=cost[i]);
-  state.plots[plot]='barracks';
+  state.plots[plot]=type;
   const t=now();
-  state.queue={kind:'building',id:'barracks',next:1,start:t,end:t+duration(1)};
+  state.queue={kind:'building',id:type,next:1,start:t,end:t+duration(1)};
   save();closeModal();render();
+}
+function placeExistingBuilding(plot,type){
+  if(state.plots[plot]||Object.values(state.plots).includes(type))return;
+  state.plots[plot]=type;save();closeModal();render();
+}
+function buildOptionHtml(type){
+  const builtLevel=state.buildings[type]||0;
+  const placed=Object.values(state.plots).includes(type);
+  if(placed)return '';
+  const ready=typeReady(type);
+  const cost=buildingPrice(type,1);
+  const placeOnly=builtLevel>0;
+  const disabled=!placeOnly&&( !ready || state.queue || !enough(cost));
+  const title=placeOnly
+    ? `${BLD[type].icon} Plaats ${BLD[type].name} (niveau ${builtLevel})`
+    : `${BLD[type].icon} Bouw ${BLD[type].name} · niveau 1${!ready?' 🔒':''}`;
+  const actionAttr=placeOnly?`data-place-existing="${type}"`:`data-build-place="${type}"`;
+  const details=buildRequirementText(type);
+  const costs=placeOnly?`<p class="subtle">Dit gebouw is al gebouwd en kan gratis op een vrije plek worden neergezet.</p>`:`<p class="subtle">Bouwkosten: 🪵 ${fmt(cost[0])} · 🧱 ${fmt(cost[1])} · ⛏️ ${fmt(cost[2])} · 🌾 ${fmt(cost[3])}</p>`;
+  return `<div class="build-option"><button class="action ${!placeOnly&&!ready?'locked-choice':''}" ${actionAttr} ${disabled?'disabled':''}>${title}</button><div class="subtle">${details}</div>${costs}</div>`;
 }
 function showPlot(n){
   update();
   const built=state.plots[n];
   if(built){showBuilding(built);return;}
-  const available=['warehouse','granary'].filter(type=>!Object.values(state.plots).includes(type));
-  const placedBarracks=Object.values(state.plots).includes('barracks');
-  const ready=barracksReady();
-  let controls=available.map(type=>`<button class="action place-choice" data-place="${type}" style="margin:7px 0">${BLD[type].icon} Plaats ${BLD[type].name} (niveau ${state.buildings[type]||1})</button>`).join('');
-  if(!placedBarracks){
-    const cost=buildingPrice('barracks',1);
-    const detail=`<div class="subtle">Vereisten: hoofdgebouw niveau 3 ${(state.buildings.main||0)>=3?'✅':'🔒'} · verzamelplaats niveau 1 ${(state.buildings.rally||0)>=1?'✅':'🔒'}</div>`;
-    controls+=`<div class="barracks-option"><button class="action ${!ready?'locked-choice':''}" id="placeBarracks" ${!ready||state.queue||!enough(cost)?'disabled':''}>⚔️ Kazerne bouwen · niveau 1${!ready?' 🔒':''}</button>${detail}${ready?`<p class="subtle">Bouwkosten: 🪵 ${fmt(cost[0])} · 🧱 ${fmt(cost[1])} · ⛏️ ${fmt(cost[2])} · 🌾 ${fmt(cost[3])}</p>`:''}</div>`;
-  }
-  modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>De beschikbare gebouwen hebben een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Pakhuis en graanschuur staan al in je spelstand en zijn gratis te plaatsen. De kazerne moet je eerst vrijspelen en bouwen.</p>`);
-  document.querySelectorAll('[data-place]').forEach(b=>b.addEventListener('click',()=>{
-    if(state.plots[n]||Object.values(state.plots).includes(b.dataset.place))return;
-    state.plots[n]=b.dataset.place;save();closeModal();render();
-  }));
-  const btn=$('#placeBarracks');if(btn)btn.onclick=()=>beginBarracks(n);
+  const controls=['warehouse','granary','market','barracks'].map(buildOptionHtml).filter(Boolean).join('');
+  modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>Alle beschikbare gebouwen hebben al een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Je begint met 600 opslagruimte. Pakhuis en graanschuur verhogen dat naar 800 op niveau 1.</p>`);
+  document.querySelectorAll('[data-place-existing]').forEach(b=>b.addEventListener('click',()=>placeExistingBuilding(n,b.dataset.placeExisting)));
+  document.querySelectorAll('[data-build-place]').forEach(b=>b.addEventListener('click',()=>beginPlacedBuilding(n,b.dataset.buildPlace)));
 }
 function renderMap(){
   const symbols=['?','?','?','?','?','?','🌲','⛰️','🌾','?','?','🌿','🏰','🌳','?','?','🪨','🌲','🌿','?','?','?','?','?','?'];
@@ -198,18 +226,20 @@ function showBuilding(id){
   if(!BLD[id])return;
   update();
   let level=state.buildings[id]||0,next=level+1,cost=buildingPrice(id,next);
-  if(id==='barracks' && !level){modal('<h2>⚔️ Kazerne in aanbouw</h2><p>Je kazerne wordt op deze plek gebouwd. Het gebouw verschijnt na afloop op niveau 1.</p>');return;}
+  const underConstruction=level===0 && Object.values(state.plots).includes(id);
+  if(underConstruction){modal(`<h2>${BLD[id].icon} ${BLD[id].name} in aanbouw</h2><p>Dit gebouw wordt op deze plek gebouwd. Na afronding verschijnt het op niveau 1.</p>`);return;}
   let info=
-    id==='warehouse'?`Opslag hout, klei en erts: ${fmt(cap(level||1))} → ${fmt(cap(next))}`:
-    id==='granary'?`Graanopslag: ${fmt(cap(level||1))} → ${fmt(cap(next))}`:
+    id==='warehouse'?`Opslag hout, klei en erts: ${fmt(storageCap(level))} → ${fmt(storageCap(next))}`:
+    id==='granary'?`Graanopslag: ${fmt(storageCap(level))} → ${fmt(storageCap(next))}`:
     id==='main'?'Het hoofdgebouw vormt het hart van het dorp. Bouwtijdkortingen voegen we later toe.':
     id==='wall'?'De stadsmuur omringt het dorp. Verdediging voegen we later toe, maar je kunt hem nu al bouwen en verbeteren.':
     id==='barracks'?'De kazerne is de toekomstige plek om soldaten te trainen. Troepentraining voegen we later toe.':
+    id==='market'?'De marktplaats wordt later de plek voor handel en transport. Voor nu kun je hem bouwen en verbeteren.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
 }
-$('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt maximaal 800 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen plaatsen of verbeteren. Pakhuis en graanschuur kun je zelf op een bouwplaats zetten; de kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
+$('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
 document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});
 $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
 document.querySelectorAll('.bottom button').forEach(b=>b.onclick=()=>{screen=b.dataset.screen;resourceOpen=null;render()});
