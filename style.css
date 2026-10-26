@@ -61,3 +61,29 @@
 .building-asset{position:absolute;width:115%;height:115%;object-fit:contain;left:50%;top:48%;transform:translate(-50%,-50%);pointer-events:none;filter:drop-shadow(1px 3px 2px #17281866);}
 .building-tag{position:absolute;left:50%;bottom:-11px;transform:translateX(-50%);border:1px solid #c4ab70;background:#233929eb;padding:3px 7px;border-radius:12px;white-space:nowrap;color:#fff0d1;font-size:10px;font-weight:bold;line-height:1.1;pointer-events:none;}
 .village-plot.village-occupied:active{background:#ffe18728;}
+
+/* v0.6 — wall + rally assets, cleaner village labels */
+.village-layout{background:#6a9958;}
+.village-plot{overflow:visible;z-index:4;display:flex;align-items:center;justify-content:center;}
+.village-plot.village-occupied{width:21%;height:22%;}
+.plot-number,.level-badge,.fixed-placeholder{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 7px;border-radius:999px;border:1px solid #d5b67c;background:#273d2ddf;color:#fff0bd;font-size:12px;font-weight:800;line-height:1;box-shadow:0 2px 4px #0006;pointer-events:none}
+.plot-number{min-width:26px;height:26px;background:#243928ee;color:#fef4cf}
+.level-badge{position:absolute;right:6%;bottom:5%;z-index:8}
+.building-asset{position:absolute;width:115%;height:115%;object-fit:contain;left:50%;top:48%;transform:translate(-50%,-50%);pointer-events:none;filter:drop-shadow(1px 3px 2px #17281866)}
+.building-tag{display:none!important}
+.village-wall-overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;z-index:2}
+.village-rally-overlay{position:absolute;left:50%;top:54.5%;width:26%;height:24%;transform:translate(-50%,-50%);object-fit:contain;pointer-events:none;z-index:3;filter:drop-shadow(1px 2px 2px #17281855)}
+.village-main-hotspot{z-index:6}
+.village-main-hotspot .level-badge{right:24%;bottom:14%}
+.fixed-hotspot{position:absolute;border:0;background:transparent;padding:0;touch-action:manipulation;z-index:7}
+.fixed-hotspot:focus-visible{outline:3px solid #ffe4a7;outline-offset:0;background:#ffe18733}
+.fixed-hotspot:active{background:#ffe1872b}
+.fixed-rally{left:50%;top:55%;width:24%;height:22%;transform:translate(-50%,-50%);border-radius:24%}
+.fixed-rally:not(.is-built){border:2px dashed rgba(255,240,189,.55);background:rgba(255,255,255,.06)}
+.fixed-rally:not(.is-built) .fixed-placeholder{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+.fixed-rally.is-built .level-badge{right:34%;bottom:22%}
+.fixed-wall{right:4%;bottom:3%;width:14%;height:11%;border-radius:20%}
+.fixed-wall:not(.is-built) .fixed-placeholder{position:absolute;right:8%;bottom:4%}
+.fixed-wall.is-built{width:16%;height:12%;background:transparent}
+.fixed-wall.is-built .level-badge{right:4%;bottom:2%}
+.note{margin:13px 16px;color:#d3ddbb;font-size:13px;line-height:1.5}

@@ -1,7 +1,12 @@
 /* Project Kingdom — game rules and data. Visual presentation lives in style.css. */
 'use strict';
 const KEY='project-kingdom-save-v01';
-const TYPES={wood:{name:'Houthakker',resource:'Hout',icon:'🌲',field:'wood',base:[10,25,25,15]},clay:{name:'Kleigroeve',resource:'Klei',icon:'🧱',field:'clay',base:[25,10,25,15]},iron:{name:'Ertsmijn',resource:'Erts',icon:'⛏️',field:'iron',base:[25,25,10,15]},crop:{name:'Graanveld',resource:'Graan',icon:'🌾',field:'crop',base:[20,20,20,10]}};
+const TYPES={
+  wood:{name:'Houthakker',resource:'Hout',icon:'🌲',field:'wood',base:[10,25,25,15]},
+  clay:{name:'Kleigroeve',resource:'Klei',icon:'🧱',field:'clay',base:[25,10,25,15]},
+  iron:{name:'Ertsmijn',resource:'Erts',icon:'⛏️',field:'iron',base:[25,25,10,15]},
+  crop:{name:'Graanveld',resource:'Graan',icon:'🌾',field:'crop',base:[20,20,20,10]}
+};
 const RES=['wood','clay','iron','crop'];
 const ICON={wood:'🪵',clay:'🧱',iron:'⛏️',crop:'🌾'};
 const YIELD=[0,10,15,23,35,53,80,120,180,270,405];
@@ -9,84 +14,182 @@ const now=()=>Date.now();
 const cap=n=>{let v=800;for(let i=2;i<=n;i++)v*=i<5?1.2:i<10?1.3:1.5;return Math.round(v)};
 const fmt=n=>Math.floor(n).toLocaleString('nl-NL');
 const duration=n=>Math.round(20*Math.pow(1.55,n-1))*1000;
-const initial=()=>({version:1,plots:{},stock:{wood:200,clay:200,iron:200,crop:200},fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),buildings:{main:1,warehouse:1,granary:1},queue:null,last:now()});
-function load(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&x.version===1&&Array.isArray(x.fields)&&x.fields.length===10&&x.stock&&x.buildings)return x;}catch{}return initial();}
+const initial=()=>({
+  version:1,
+  plots:{},
+  stock:{wood:200,clay:200,iron:200,crop:200},
+  fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),
+  buildings:{main:1,warehouse:1,granary:1},
+  queue:null,
+  last:now()
+});
+function load(){
+  try{
+    const x=JSON.parse(localStorage.getItem(KEY));
+    if(x&&x.version===1&&Array.isArray(x.fields)&&x.fields.length===10&&x.stock&&x.buildings)return x;
+  }catch{}
+  return initial();
+}
 let state=load(),screen='fields',resourceOpen=null;
-if(!state.plots||typeof state.plots!=='object')state.plots={}; // retain existing save, no reset
+if(!state.plots||typeof state.plots!=='object')state.plots={};
+if(!state.buildings)state.buildings={main:1,warehouse:1,granary:1};
+if(state.buildings.main==null)state.buildings.main=1;
 
 const availableCap=r=>cap(state.buildings[r==='crop'?'granary':'warehouse']||1);
 function perHour(r){return 25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0)}
-function update(){let t=now();let until=state.queue?Math.min(t,state.queue.end):t;let dt=Math.max(0,until-state.last)/3600000;
- for(const r of RES) state.stock[r]=Math.min(availableCap(r),state.stock[r]+perHour(r)*dt);
- if(state.queue&&t>=state.queue.end){const q=state.queue;if(q.kind==='field')state.fields[q.id].level++;if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;state.queue=null;let after=Math.max(0,t-until)/3600000;for(const r of RES)state.stock[r]=Math.min(availableCap(r),state.stock[r]+perHour(r)*after)}
- state.last=t;save();}
+function update(){
+  let t=now();
+  let until=state.queue?Math.min(t,state.queue.end):t;
+  let dt=Math.max(0,until-state.last)/3600000;
+  for(const r of RES) state.stock[r]=Math.min(availableCap(r),state.stock[r]+perHour(r)*dt);
+  if(state.queue&&t>=state.queue.end){
+    const q=state.queue;
+    if(q.kind==='field')state.fields[q.id].level++;
+    if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;
+    state.queue=null;
+    let after=Math.max(0,t-until)/3600000;
+    for(const r of RES)state.stock[r]=Math.min(availableCap(r),state.stock[r]+perHour(r)*after)
+  }
+  state.last=t;
+  save();
+}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch{}}
 function price(type,level){return TYPES[type].base.map(x=>Math.ceil(x*Math.pow(1.3,level)))}
-const BLD={main:{name:'Hoofdgebouw',icon:'🏛️',base:[65,70,50,35]},warehouse:{name:'Pakhuis',icon:'📦',base:[65,70,45,30]},granary:{name:'Graanschuur',icon:'🌾',base:[55,60,40,35]},wall:{name:'Stadsmuur',icon:'🧱',base:[70,95,80,40]},rally:{name:'Verzamelplaats',icon:'🚩',base:[40,55,55,20]}};
+const BLD={
+  main:{name:'Hoofdgebouw',icon:'🏛️',base:[65,70,50,35]},
+  warehouse:{name:'Pakhuis',icon:'📦',base:[65,70,45,30]},
+  granary:{name:'Graanschuur',icon:'🌾',base:[55,60,40,35]},
+  wall:{name:'Stadsmuur',icon:'🧱',base:[70,95,80,40]},
+  rally:{name:'Verzamelplaats',icon:'🚩',base:[40,55,55,20]}
+};
 const buildingPrice=(id,lvl)=>BLD[id].base.map(c=>Math.ceil(c*Math.pow(1.3,Math.max(0,lvl-1))));
 const enough=c=>RES.every((r,i)=>state.stock[r]>=c[i]);
-function startBuild(kind,id,cost,next){update();if(state.queue||!enough(cost))return;RES.forEach((r,i)=>state.stock[r]-=cost[i]);state.queue={kind,id,next,start:now(),end:now()+duration(next)};save();closeModal();render();}
+function startBuild(kind,id,cost,next){
+  update();
+  if(state.queue||!enough(cost))return;
+  RES.forEach((r,i)=>state.stock[r]-=cost[i]);
+  state.queue={kind,id,next,start:now(),end:now()+duration(next)};
+  save();
+  closeModal();
+  render();
+}
 const $=s=>document.querySelector(s);
-function renderResources(){const el=$('#resources');el.innerHTML=RES.map(r=>`<button class="resource ${state.stock[r]>=availableCap(r)?'full':''}" data-res="${r}"><span class="emoji">${ICON[r]}</span><span class="num">${fmt(state.stock[r])}</span><span class="cap">/ ${fmt(availableCap(r))}</span></button>`).join('');const p=$('#productionPanel');p.classList.toggle('hidden',!resourceOpen);if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{resourceOpen=resourceOpen===b.dataset.res?null:b.dataset.res;renderResources()}))}
-// Fixed field positions on the continuous artwork. Game field IDs and saved data remain unchanged.
+function renderResources(){
+  const el=$('#resources');
+  el.innerHTML=RES.map(r=>`<button class="resource ${state.stock[r]>=availableCap(r)?'full':''}" data-res="${r}"><span class="emoji">${ICON[r]}</span><span class="num">${fmt(state.stock[r])}</span><span class="cap">/ ${fmt(availableCap(r))}</span></button>`).join('');
+  const p=$('#productionPanel');
+  p.classList.toggle('hidden',!resourceOpen);
+  if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;
+  el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{resourceOpen=resourceOpen===b.dataset.res?null:b.dataset.res;renderResources()}))
+}
+
 const LAND_PLOTS=[
- {id:0,x:13.5,y:10.5,w:24,h:16},  // wood top left
- {id:1,x:50,y:14,w:29,h:14},     // wheat top
- {id:2,x:15,y:31,w:26,h:17},    // iron left
- {id:3,x:14,y:53.5,w:27,h:15},  // wheat left
- {id:4,x:15,y:75,w:28,h:16},    // clay bottom left
- {id:5,x:86,y:53.5,w:27,h:15},  // wheat right
- {id:6,x:86,y:10.5,w:24,h:16},  // wood top right
- {id:7,x:85,y:31,w:26,h:17},    // iron right
- {id:8,x:50,y:83,w:31,h:16},    // wheat bottom
- {id:9,x:85,y:75,w:28,h:16}    // clay bottom right
+ {id:0,x:13.5,y:10.5,w:24,h:16},
+ {id:1,x:50,y:14,w:29,h:14},
+ {id:2,x:15,y:31,w:26,h:17},
+ {id:3,x:14,y:53.5,w:27,h:15},
+ {id:4,x:15,y:75,w:28,h:16},
+ {id:5,x:86,y:53.5,w:27,h:15},
+ {id:6,x:86,y:10.5,w:24,h:16},
+ {id:7,x:85,y:31,w:26,h:17},
+ {id:8,x:50,y:83,w:31,h:16},
+ {id:9,x:85,y:75,w:28,h:16}
 ];
 function renderFields(){
- const spots=LAND_PLOTS.map(pos=>{
-  const f=state.fields[pos.id],busy=state.queue?.kind==='field'&&state.queue.id===f.id;
-  return `<button type="button" class="land-hotspot ${busy?'land-busy':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} ${f.id+1}, niveau ${f.level}"><span class="land-level">${busy?'🔨 ':''}${f.level}</span></button>`;
- }).join('');
- return `<div class="scene-head"><div><h1>De landerijen</h1><p>Tik op een grondstofgebied om te verbeteren</p></div><span class="pill">10 velden</span></div><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Doorlopend landschap met twee houthakkers, twee mijnen, twee kleigroeven, vier graanvelden en een dorp met brug" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section><p class="land-instruction">Tik op een veld om te upgraden of op het dorp om naar de dorpskern te gaan.</p><div class="info-strip"><span>🏡 Basisproductie +25/u</span><span>🔨 Eén bouwproject tegelijk</span></div>`;
+  const spots=LAND_PLOTS.map(pos=>{
+    const f=state.fields[pos.id],busy=state.queue?.kind==='field'&&state.queue.id===f.id;
+    return `<button type="button" class="land-hotspot ${busy?'land-busy':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} ${f.id+1}, niveau ${f.level}"><span class="land-level">${busy?'🔨 ':''}${f.level}</span></button>`;
+  }).join('');
+  return `<div class="scene-head"><div><h1>De landerijen</h1><p>Tik op een grondstofgebied om te verbeteren</p></div><span class="pill">10 velden</span></div><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Doorlopend landschap met twee houthakkers, twee mijnen, twee kleigroeven, vier graanvelden en een dorp met brug" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section><p class="land-instruction">Tik op een veld om te upgraden of op het dorp om naar de dorpskern te gaan.</p><div class="info-strip"><span>🏡 Basisproductie +25/u</span><span>🔨 Eén bouwproject tegelijk</span></div>`;
 }
-// v0.3: the village is a visual layout prototype. Keep economy/save schema untouched.
+
 const VILLAGE_PLOTS=[
  {n:1,x:65,y:18},{n:2,x:77,y:29},{n:3,x:77,y:45},
  {n:4,x:74,y:61},{n:5,x:49,y:68},{n:6,x:26,y:61},
  {n:7,x:23,y:45},{n:8,x:23,y:29},{n:9,x:35,y:18}
 ];
+function plotArt(type){
+  return type==='warehouse'?'assets/warehouse-v050.png':type==='granary'?'assets/granary-v050.png':null;
+}
 function renderVillage(){
- const plots=VILLAGE_PLOTS.map(p=>{
-  const type=state.plots[p.n];
-  const art=type==='warehouse'?'assets/warehouse-v050.png':type==='granary'?'assets/granary-v050.png':null;
-  return `<button class="village-plot ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="building-tag">${BLD[type].name} · ${state.buildings[type]||1}</span>`:''}</button>`;
- }).join('');
- return `<div class="scene-head"><div><h1>De dorpskern</h1><p>Negen vrije bouwplaatsen · plaats je gebouwen zelf</p></div><span class="pill">🏡 Dorp 1</span></div>
- <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
- <img class="village-art" src="assets/village-layout-v031.webp" alt="Dorp met hoofdgebouw en negen genummerde kavels; zonder muur of verzamelplaats" draggable="false">
- ${plots}
- <button class="village-main-hotspot" data-building="main" aria-label="Hoofdgebouw verbeteren"></button>
- </section>
- <p class="note">🏗️ Tik op een lege bouwplaats om het pakhuis of de graanschuur een plek te geven. Tik op een geplaatst gebouw om het te verbeteren. Plaatsen is gratis: beide gebouwen zitten al in je spelstand.</p>`;
+  const rallyBuilt=(state.buildings.rally||0)>0;
+  const wallBuilt=(state.buildings.wall||0)>0;
+  const plots=VILLAGE_PLOTS.map(p=>{
+    const type=state.plots[p.n];
+    const art=plotArt(type);
+    return `<button class="village-plot ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="level-badge">${state.buildings[type]||1}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
+  }).join('');
+  return `<div class="scene-head"><div><h1>De dorpskern</h1><p>Negen vrije bouwplaatsen · plaats je gebouwen zelf</p></div><span class="pill">🏡 Dorp 1</span></div>
+  <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
+    <img class="village-art" src="assets/village-layout-v031.webp" alt="Dorp met hoofdgebouw en negen genummerde kavels; zonder muur of verzamelplaats" draggable="false">
+    ${wallBuilt?`<img class="village-wall-overlay" src="assets/wall-v060.png" alt="" draggable="false">`:''}
+    ${rallyBuilt?`<img class="village-rally-overlay" src="assets/rally-v060.png" alt="" draggable="false">`:''}
+    ${plots}
+    <button class="village-main-hotspot" data-building="main" aria-label="Hoofdgebouw verbeteren"><span class="level-badge">${state.buildings.main||1}</span></button>
+    <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
+    <button class="fixed-hotspot fixed-wall ${wallBuilt?'is-built':''}" data-building="wall" aria-label="${wallBuilt?'Stadsmuur verbeteren':'Stadsmuur bouwen'}">${wallBuilt?`<span class="level-badge">${state.buildings.wall||1}</span>`:`<span class="fixed-placeholder">🛡️</span>`}</button>
+  </section>
+  <p class="note">🏗️ Tik op een lege bouwplaats om het pakhuis of de graanschuur een plek te geven. Tik op een geplaatst gebouw of vast onderdeel voor details en upgrades.</p>`;
 }
 function showPlot(n){
- const built=state.plots[n];
- if(built){showBuilding(built);return;}
- const available=['warehouse','granary'].filter(type=>!Object.values(state.plots).includes(type));
- const controls=available.map(type=>`<button class="action place-choice" data-place="${type}" style="margin:7px 0">${BLD[type].icon} Plaats ${BLD[type].name} (niveau ${state.buildings[type]||1})</button>`).join('');
- modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>Het pakhuis en de graanschuur hebben allebei een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Plaatsen kost geen grondstoffen en verandert de productie of opslag niet.</p>`);
- document.querySelectorAll('[data-place]').forEach(b=>b.addEventListener('click',()=>{
-  if(state.plots[n]||Object.values(state.plots).includes(b.dataset.place))return;
-  state.plots[n]=b.dataset.place;save();closeModal();render();
- }));
+  const built=state.plots[n];
+  if(built){showBuilding(built);return;}
+  const available=['warehouse','granary'].filter(type=>!Object.values(state.plots).includes(type));
+  const controls=available.map(type=>`<button class="action place-choice" data-place="${type}" style="margin:7px 0">${BLD[type].icon} Plaats ${BLD[type].name} (niveau ${state.buildings[type]||1})</button>`).join('');
+  modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>Het pakhuis en de graanschuur hebben allebei een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Plaatsen kost geen grondstoffen en verandert de productie of opslag niet.</p>`);
+  document.querySelectorAll('[data-place]').forEach(b=>b.addEventListener('click',()=>{
+    if(state.plots[n]||Object.values(state.plots).includes(b.dataset.place))return;
+    state.plots[n]=b.dataset.place;save();closeModal();render();
+  }));
 }
-function renderMap(){const symbols=['?','?','?','?','?','?','🌲','⛰️','🌾','?','?','🌿','🏰','🌳','?','?','🪨','🌲','🌿','?','?','?','?','?','?'];return `<div class="scene-head"><div><h1>De wereld</h1><p>De eerste negen vakken zijn bekend</p></div><span class="pill">3 × 3 ontdekt</span></div><section class="world">${symbols.map((s,i)=>`<div class="worldcell ${s==='?'?'fog':''}">${s}</div>`).join('')}</section><p class="note">🧭 De wereldkaart is alvast zichtbaar. Verkenners, NPC-koninkrijken en verdere ontdekking bouwen we in een volgende versie.</p>`}
-function renderQueue(){const q=state.queue,el=$('#queue');if(!q){el.innerHTML='';return}let label=q.kind==='field'?TYPES[state.fields[q.id].type].name:BLD[q.id].name;let left=Math.max(0,Math.ceil((q.end-now())/1000)),total=q.end-q.start;el.innerHTML=`<strong>🔨 In aanbouw: ${label} → niveau ${q.next}</strong><div>Resterend: ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}</div><div class="meter"><div style="width:${Math.min(100,Math.max(0,(now()-q.start)/total*100))}%"></div></div>`}
-function render(){update();renderResources();$('#main').innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();renderQueue();document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));document.querySelectorAll('[data-open-village]').forEach(b=>b.addEventListener('click',()=>{screen='village';render()}));document.querySelectorAll('[data-building]').forEach(b=>b.addEventListener('click',()=>showBuilding(b.dataset.building)));document.querySelectorAll('[data-plot]').forEach(b=>b.addEventListener('click',()=>showPlot(+b.dataset.plot)))}
+function renderMap(){
+  const symbols=['?','?','?','?','?','?','🌲','⛰️','🌾','?','?','🌿','🏰','🌳','?','?','🪨','🌲','🌿','?','?','?','?','?','?'];
+  return `<div class="scene-head"><div><h1>De wereld</h1><p>De eerste negen vakken zijn bekend</p></div><span class="pill">3 × 3 ontdekt</span></div><section class="world">${symbols.map((s,i)=>`<div class="worldcell ${s==='?'?'fog':''}">${s}</div>`).join('')}</section><p class="note">🧭 De wereldkaart is alvast zichtbaar. Verkenners, NPC-koninkrijken en verdere ontdekking bouwen we in een volgende versie.</p>`;
+}
+function renderQueue(){
+  const q=state.queue,el=$('#queue');
+  if(!q){el.innerHTML='';return}
+  let label=q.kind==='field'?TYPES[state.fields[q.id].type].name:BLD[q.id].name;
+  let left=Math.max(0,Math.ceil((q.end-now())/1000)),total=q.end-q.start;
+  el.innerHTML=`<strong>🔨 In aanbouw: ${label} → niveau ${q.next}</strong><div>Resterend: ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}</div><div class="meter"><div style="width:${Math.min(100,Math.max(0,(now()-q.start)/total*100))}%"></div></div>`;
+}
+function render(){
+  update();
+  renderResources();
+  $('#main').innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();
+  renderQueue();
+  document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));
+  document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));
+  document.querySelectorAll('[data-open-village]').forEach(b=>b.addEventListener('click',()=>{screen='village';render()}));
+  document.querySelectorAll('[data-building]').forEach(b=>b.addEventListener('click',()=>showBuilding(b.dataset.building)));
+  document.querySelectorAll('[data-plot]').forEach(b=>b.addEventListener('click',()=>showPlot(+b.dataset.plot)));
+}
 function modal(html){$('#modal').innerHTML=`<button class="close" aria-label="Sluiten" id="closeModal">✕</button>`+html;$('#modalBackdrop').classList.remove('hidden');$('#closeModal').onclick=closeModal}
 function closeModal(){$('#modalBackdrop').classList.add('hidden')}
 function costHtml(cost){return `<div class="cost-grid">${cost.map((c,i)=>`<div class="cost ${state.stock[RES[i]]<c?'insufficient':''}">${ICON[RES[i]]}<br><b>${fmt(c)}</b></div>`).join('')}</div>`}
-function showField(id){update();let f=state.fields[id],t=TYPES[f.type],next=f.level+1,cost=price(f.type,f.level),busy=!!state.queue;modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);$('#doBuild').onclick=()=>startBuild('field',id,cost,next)}
-function showBuilding(id){if(!BLD[id])return;update();let level=state.buildings[id]||0,next=level+1,cost=buildingPrice(id,next);let info=id==='warehouse'?`Opslag hout, klei en erts: ${fmt(cap(level||1))} → ${fmt(cap(next))}`:id==='granary'?`Graanopslag: ${fmt(cap(level||1))} → ${fmt(cap(next))}`:id==='main'?'Het hoofdgebouw vormt het hart van het dorp. Bouwtijdkortingen voegen we later toe.':id==='wall'?'Verdediging wordt later actief zodra er gevechten zijn.':'Hier verzamelen later je troepen.';modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);$('#doBuild').onclick=()=>startBuild('building',id,cost,next)}
-$('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt maximaal 800 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen upgraden of nieuwe plaatsen. Op <b>Kaart</b> zie je alvast de omgeving. Je voortgang wordt automatisch in deze browser opgeslagen.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});
-$('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});document.querySelectorAll('.bottom button').forEach(b=>b.onclick=()=>{screen=b.dataset.screen;resourceOpen=null;render()});
-render();setInterval(render,1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
+function showField(id){
+  update();
+  let f=state.fields[id],t=TYPES[f.type],next=f.level+1,cost=price(f.type,f.level),busy=!!state.queue;
+  modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);
+  $('#doBuild').onclick=()=>startBuild('field',id,cost,next);
+}
+function showBuilding(id){
+  if(!BLD[id])return;
+  update();
+  let level=state.buildings[id]||0,next=level+1,cost=buildingPrice(id,next);
+  let info=
+    id==='warehouse'?`Opslag hout, klei en erts: ${fmt(cap(level||1))} → ${fmt(cap(next))}`:
+    id==='granary'?`Graanopslag: ${fmt(cap(level||1))} → ${fmt(cap(next))}`:
+    id==='main'?'Het hoofdgebouw vormt het hart van het dorp. Bouwtijdkortingen voegen we later toe.':
+    id==='wall'?'De stadsmuur omringt het dorp. Verdediging voegen we later toe, maar je kunt hem nu al bouwen en verbeteren.':
+    'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
+  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
+  $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
+}
+$('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt maximaal 800 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen plaatsen of verbeteren. Pakhuis en graanschuur kun je zelf op een bouwplaats zetten. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
+document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});
+$('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
+document.querySelectorAll('.bottom button').forEach(b=>b.onclick=()=>{screen=b.dataset.screen;resourceOpen=null;render()});
+render();
+setInterval(render,1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});

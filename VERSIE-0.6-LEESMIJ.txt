@@ -1,0 +1,16 @@
+Project Kingdom 0.6
+
+Nieuw in deze versie:
+- losse asset voor de stadsmuur toegevoegd
+- losse asset voor de verzamelplaats toegevoegd
+- gebouwnamen uit het dorpsoverzicht verwijderd
+- alleen niveau-bolletjes zichtbaar op gebouwen
+- vaste plek voor hoofdgebouw, muur en verzamelplaats klikbaar
+- tik op een gebouw voor details en upgrades
+
+Upload/vervang op GitHub:
+- index.html
+- game.js
+- style.css
+- assets/wall-v060.png
+- assets/rally-v060.png
