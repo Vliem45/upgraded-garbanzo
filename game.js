@@ -9,9 +9,11 @@ const now=()=>Date.now();
 const cap=n=>{let v=800;for(let i=2;i<=n;i++)v*=i<5?1.2:i<10?1.3:1.5;return Math.round(v)};
 const fmt=n=>Math.floor(n).toLocaleString('nl-NL');
 const duration=n=>Math.round(20*Math.pow(1.55,n-1))*1000;
-const initial=()=>({version:1,stock:{wood:200,clay:200,iron:200,crop:200},fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),buildings:{main:1,warehouse:1,granary:1},queue:null,last:now()});
+const initial=()=>({version:1,plots:{},stock:{wood:200,clay:200,iron:200,crop:200},fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),buildings:{main:1,warehouse:1,granary:1},queue:null,last:now()});
 function load(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&x.version===1&&Array.isArray(x.fields)&&x.fields.length===10&&x.stock&&x.buildings)return x;}catch{}return initial();}
 let state=load(),screen='fields',resourceOpen=null;
+if(!state.plots||typeof state.plots!=='object')state.plots={}; // retain existing save, no reset
+
 const availableCap=r=>cap(state.buildings[r==='crop'?'granary':'warehouse']||1);
 function perHour(r){return 25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0)}
 function update(){let t=now();let until=state.queue?Math.min(t,state.queue.end):t;let dt=Math.max(0,until-state.last)/3600000;
@@ -53,17 +55,30 @@ const VILLAGE_PLOTS=[
  {n:7,x:23,y:45},{n:8,x:23,y:29},{n:9,x:35,y:18}
 ];
 function renderVillage(){
- const plots=VILLAGE_PLOTS.map(p=>`<button class="village-plot" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}: vrij"></button>`).join('');
- return `<div class="scene-head"><div><h1>De dorpskern</h1><p>Negen vrije bouwplaatsen · geen muur of verzamelplaats</p></div><span class="pill">🏡 Dorp 1</span></div>
+ const plots=VILLAGE_PLOTS.map(p=>{
+  const type=state.plots[p.n];
+  const art=type==='warehouse'?'assets/warehouse-v050.png':type==='granary'?'assets/granary-v050.png':null;
+  return `<button class="village-plot ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="building-tag">${BLD[type].name} · ${state.buildings[type]||1}</span>`:''}</button>`;
+ }).join('');
+ return `<div class="scene-head"><div><h1>De dorpskern</h1><p>Negen vrije bouwplaatsen · plaats je gebouwen zelf</p></div><span class="pill">🏡 Dorp 1</span></div>
  <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
- <img class="village-art" src="assets/village-layout-v031.webp" alt="Dorp met hoofdgebouw en negen genummerde lege kavels; nog geen muur of verzamelplaats" draggable="false">
+ <img class="village-art" src="assets/village-layout-v031.webp" alt="Dorp met hoofdgebouw en negen genummerde kavels; zonder muur of verzamelplaats" draggable="false">
  ${plots}
  <button class="village-main-hotspot" data-building="main" aria-label="Hoofdgebouw verbeteren"></button>
  </section>
- <p class="note">🏛️ Tik op het hoofdgebouw om het te verbeteren, of op een genummerde kavel om die te bekijken. De negen kavels zijn in deze proef nog niet bebouwbaar. De plekken voor stadsmuur en verzamelplaats bewaren we voor later.</p>
- <p class="note">📦 Je bestaande pakhuis en graanschuur blijven in de spelgegevens bestaan, maar hebben nog geen getekende plek. Dat koppelen we aan een bouwplaats zodra we de losse gebouwassets maken.</p>`;
+ <p class="note">🏗️ Tik op een lege bouwplaats om het pakhuis of de graanschuur een plek te geven. Tik op een geplaatst gebouw om het te verbeteren. Plaatsen is gratis: beide gebouwen zitten al in je spelstand.</p>`;
 }
-function showPlot(n){modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Dit is een vrije bouwplaats. Later bepaal je zelf welk gebouw hier komt te staan.</p><p class="subtle">Voor versie 0.3 testen we alleen de positie en het aantikken. Er wordt niets gebouwd of uitgegeven.</p>`)}
+function showPlot(n){
+ const built=state.plots[n];
+ if(built){showBuilding(built);return;}
+ const available=['warehouse','granary'].filter(type=>!Object.values(state.plots).includes(type));
+ const controls=available.map(type=>`<button class="action place-choice" data-place="${type}" style="margin:7px 0">${BLD[type].icon} Plaats ${BLD[type].name} (niveau ${state.buildings[type]||1})</button>`).join('');
+ modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>Het pakhuis en de graanschuur hebben allebei een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Plaatsen kost geen grondstoffen en verandert de productie of opslag niet.</p>`);
+ document.querySelectorAll('[data-place]').forEach(b=>b.addEventListener('click',()=>{
+  if(state.plots[n]||Object.values(state.plots).includes(b.dataset.place))return;
+  state.plots[n]=b.dataset.place;save();closeModal();render();
+ }));
+}
 function renderMap(){const symbols=['?','?','?','?','?','?','🌲','⛰️','🌾','?','?','🌿','🏰','🌳','?','?','🪨','🌲','🌿','?','?','?','?','?','?'];return `<div class="scene-head"><div><h1>De wereld</h1><p>De eerste negen vakken zijn bekend</p></div><span class="pill">3 × 3 ontdekt</span></div><section class="world">${symbols.map((s,i)=>`<div class="worldcell ${s==='?'?'fog':''}">${s}</div>`).join('')}</section><p class="note">🧭 De wereldkaart is alvast zichtbaar. Verkenners, NPC-koninkrijken en verdere ontdekking bouwen we in een volgende versie.</p>`}
 function renderQueue(){const q=state.queue,el=$('#queue');if(!q){el.innerHTML='';return}let label=q.kind==='field'?TYPES[state.fields[q.id].type].name:BLD[q.id].name;let left=Math.max(0,Math.ceil((q.end-now())/1000)),total=q.end-q.start;el.innerHTML=`<strong>🔨 In aanbouw: ${label} → niveau ${q.next}</strong><div>Resterend: ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}</div><div class="meter"><div style="width:${Math.min(100,Math.max(0,(now()-q.start)/total*100))}%"></div></div>`}
 function render(){update();renderResources();$('#main').innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();renderQueue();document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));document.querySelectorAll('[data-open-village]').forEach(b=>b.addEventListener('click',()=>{screen='village';render()}));document.querySelectorAll('[data-building]').forEach(b=>b.addEventListener('click',()=>showBuilding(b.dataset.building)));document.querySelectorAll('[data-plot]').forEach(b=>b.addEventListener('click',()=>showPlot(+b.dataset.plot)))}
