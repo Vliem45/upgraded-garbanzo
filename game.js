@@ -20,7 +20,7 @@ const initial=()=>({
   plots:{},
   stock:{wood:200,clay:200,iron:200,crop:200},
   fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),
-  buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0},
+  buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0},
   queue:null,
   last:now()
 });
@@ -34,7 +34,7 @@ function load(){
 let state=load(),screen='fields',resourceOpen=null;
 if(!state.plots||typeof state.plots!=='object')state.plots={};
 if(!state.buildings)state.buildings={main:1,warehouse:0,granary:0};
-for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0})){
+for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0})){
   if(state.buildings[id]==null)state.buildings[id]=def;
 }
 
@@ -65,7 +65,8 @@ const BLD={
   wall:{name:'Stadsmuur',icon:'🧱',base:[70,95,80,40]},
   rally:{name:'Verzamelplaats',icon:'🚩',base:[40,55,55,20]},
   barracks:{name:'Kazerne',icon:'⚔️',base:[100,110,85,65]},
-  market:{name:'Marktplaats',icon:'🏪',base:[90,110,70,50]}
+  market:{name:'Marktplaats',icon:'🏪',base:[90,110,70,50]},
+  smithy:{name:'Smederij',icon:'⚒️',base:[120,100,130,60]}
 };
 const buildingPrice=(id,lvl)=>BLD[id].base.map(c=>Math.ceil(c*Math.pow(1.3,Math.max(0,lvl-1))));
 const enough=c=>RES.every((r,i)=>state.stock[r]>=c[i]);
@@ -118,6 +119,7 @@ function plotArt(type){
     :type==='granary'?'assets/granary-v050.png'
     :type==='barracks'?'assets/barracks-v070.png'
     :type==='market'?'assets/market-v081.png'
+    :type==='smithy'?'assets/smithy-v082.png'
     :null;
 }
 function renderVillage(){
@@ -137,18 +139,21 @@ function renderVillage(){
     <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
     <button class="fixed-hotspot fixed-wall ${wallBuilt?'is-built':''}" data-building="wall" aria-label="${wallBuilt?'Stadsmuur verbeteren':'Stadsmuur bouwen'}">${wallBuilt?`<span class="level-badge">${state.buildings.wall||1}</span>`:`<span class="fixed-placeholder">🛡️</span>`}</button>
   </section>
-  <p class="note">🏗️ Tik op een lege bouwplaats om gebouwen te bouwen of te plaatsen. De marktplaats ontgrendelt bij hoofdgebouw 3. De kazerne ontgrendelt bij hoofdgebouw 3 en verzamelplaats 1.</p>`;
+  <p class="note">🏗️ Tik op een lege bouwplaats om gebouwen te bouwen of te plaatsen. De marktplaats ontgrendelt bij hoofdgebouw 3. De kazerne ontgrendelt bij hoofdgebouw 3 en verzamelplaats 1. De smederij ontgrendelt bij hoofdgebouw 5 en kazerne 3.</p>`;
 }
 function barracksReady(){return (state.buildings.main||0)>=3 && (state.buildings.rally||0)>=1;}
 function marketReady(){return (state.buildings.main||0)>=3;}
+function smithyReady(){return (state.buildings.main||0)>=5 && (state.buildings.barracks||0)>=3;}
 function typeReady(type){
   if(type==='barracks')return barracksReady();
   if(type==='market')return marketReady();
+  if(type==='smithy')return smithyReady();
   return true;
 }
 function buildRequirementText(type){
   if(type==='barracks')return `Vereisten: hoofdgebouw niveau 3 ${(state.buildings.main||0)>=3?'✅':'🔒'} · verzamelplaats niveau 1 ${(state.buildings.rally||0)>=1?'✅':'🔒'}`;
   if(type==='market')return `Vereiste: hoofdgebouw niveau 3 ${(state.buildings.main||0)>=3?'✅':'🔒'}`;
+  if(type==='smithy')return `Vereisten: hoofdgebouw niveau 5 ${(state.buildings.main||0)>=5?'✅':'🔒'} · kazerne niveau 3 ${(state.buildings.barracks||0)>=3?'✅':'🔒'}`;
   return 'Direct beschikbaar';
 }
 function beginPlacedBuilding(plot,type){
@@ -186,7 +191,7 @@ function showPlot(n){
   update();
   const built=state.plots[n];
   if(built){showBuilding(built);return;}
-  const controls=['warehouse','granary','market','barracks'].map(buildOptionHtml).filter(Boolean).join('');
+  const controls=['warehouse','granary','market','barracks','smithy'].map(buildOptionHtml).filter(Boolean).join('');
   modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>Alle beschikbare gebouwen hebben al een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Je begint met 600 opslagruimte. Pakhuis en graanschuur verhogen dat naar 800 op niveau 1.</p>`);
   document.querySelectorAll('[data-place-existing]').forEach(b=>b.addEventListener('click',()=>placeExistingBuilding(n,b.dataset.placeExisting)));
   document.querySelectorAll('[data-build-place]').forEach(b=>b.addEventListener('click',()=>beginPlacedBuilding(n,b.dataset.buildPlace)));
@@ -235,11 +240,12 @@ function showBuilding(id){
     id==='wall'?'De stadsmuur omringt het dorp. Verdediging voegen we later toe, maar je kunt hem nu al bouwen en verbeteren.':
     id==='barracks'?'De kazerne is de toekomstige plek om soldaten te trainen. Troepentraining voegen we later toe.':
     id==='market'?'De marktplaats wordt later de plek voor handel en transport. Voor nu kun je hem bouwen en verbeteren.':
+    id==='smithy'?'De smederij wordt later de plek om wapens en uitrusting te verbeteren. Voor nu kun je hem bouwen en verbeteren.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
 }
-$('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
+$('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
 document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});
 $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
 document.querySelectorAll('.bottom button').forEach(b=>b.onclick=()=>{screen=b.dataset.screen;resourceOpen=null;render()});
