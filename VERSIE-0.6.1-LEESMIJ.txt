@@ -1,0 +1,13 @@
+Project Kingdom 0.6.1 – geïntegreerde stadsmuur
+
+De muur is nu volledig onderdeel van een complete dorpsillustratie zodra hij gebouwd is.
+Zonder muur zie je de dorpsillustratie zonder palissade. Er is geen losse muursticker meer.
+Alle bestaande spelgegevens behouden dezelfde sleutel: project-kingdom-save-v01.
+
+UPLOAD NAAR GITHUB:
+- Vervang index.html, game.js, style.css in de hoofdmap
+- Voeg assets/village-wall-on-v061.webp en assets/village-wall-off-v061.webp toe.
+- Andere bestaande bestanden laten staan.
+
+Let op: beide illustraties zijn afzonderlijk gemaakt en daarom niet pixel-identiek.
+Bij schakelen kunnen kleine details veranderen. Dit is een visuele testversie.

@@ -87,3 +87,10 @@
 .fixed-wall.is-built{width:16%;height:12%;background:transparent}
 .fixed-wall.is-built .level-badge{right:4%;bottom:2%}
 .note{margin:13px 16px;color:#d3ddbb;font-size:13px;line-height:1.5}
+
+/* v0.6.1: integrated wall is part of the entire scene rather than an overlay.
+   Identical image dimensions preserve percent-based click positions. */
+.village-wall-overlay{display:none!important}
+.fixed-wall{left:48%;right:auto;bottom:4%;width:15%;height:13%;transform:translateX(-50%);z-index:8}
+.fixed-wall:not(.is-built){left:auto;right:3%;bottom:3%;transform:none;width:12%;height:12%}
+.fixed-wall.is-built .level-badge{right:9%;bottom:0}
