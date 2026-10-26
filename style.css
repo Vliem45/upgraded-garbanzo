@@ -42,3 +42,15 @@
 .village-plot:focus-visible,.village-main-hotspot:focus-visible{outline:3px solid #ffe4a7;outline-offset:0;background:#ffe18733}
 .village-main-hotspot{position:absolute;left:50%;top:25%;width:24%;height:26%;transform:translate(-50%,-50%);border:0;background:transparent;border-radius:20%;touch-action:manipulation}
 .village-main-hotspot:active{background:#ffe18735}
+
+/* v0.4 — one continuous landerijen image; transparent, tappable field zones */
+.landscape-scene{position:relative;margin:0 10px;border:3px solid #a79870;border-radius:17px;overflow:hidden;background:#526c42;line-height:0;box-shadow:0 9px 22px #0d1e1666}
+.landscape-art{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+.land-hotspot{position:absolute;transform:translate(-50%,-50%);border:0;background:transparent;border-radius:35%;z-index:1;padding:0;touch-action:manipulation;line-height:normal}
+.land-hotspot:focus-visible,.land-village:focus-visible{outline:3px solid #ffe5a0;outline-offset:-3px;background:#f8e4a019}
+.land-hotspot:active{background:#ffe0a02e}
+.land-level{position:absolute;right:9%;bottom:5%;font-size:12px;font-weight:800;color:#fff0bd;background:#273d2ddf;border:1px solid #d5b67c;border-radius:20px;min-width:25px;padding:3px 6px;box-shadow:0 2px 4px #0006;line-height:1.1}
+.land-busy .land-level{border-color:#ffd45b}
+.land-village{position:absolute;left:50%;top:44%;width:28%;height:20%;transform:translate(-50%,-50%);z-index:2;background:transparent;border:0;padding:0;touch-action:manipulation}
+.land-village span{position:absolute;bottom:0;left:50%;transform:translateX(-50%);border:1px solid #d6bc83;background:#243e2edc;color:#fff2d1;font-size:12px;font-weight:700;border-radius:16px;padding:4px 11px;white-space:nowrap;line-height:1.1}
+.land-instruction{text-align:center;margin:8px 12px 0;font-size:12px;color:#dce5c9}

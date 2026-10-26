@@ -1,0 +1,9 @@
+PROJECT KINGDOM 0.4 — DOORLOPENDE LANDERIJEN
+
+Nieuw: een doorlopende landerijenillustratie met tien afzonderlijke aanklikbare gebieden en een dorpknop.
+De dorpskern (v0.3.1) en opgeslagen spelgegevens blijven behouden.
+
+GITHUB: upload index.html, game.js en style.css naar de hoofdmap en assets/landerijen-v040.webp naar de map assets. Bestaande bestanden niet wissen.
+
+Let op: veldlocaties zijn handmatig over de illustratie gelegd. Test het aantikken op je iPhone, zeker aan de randen van de velden.
+De illustratie zelf verandert nog niet met het veldniveau.

@@ -26,20 +26,25 @@ const enough=c=>RES.every((r,i)=>state.stock[r]>=c[i]);
 function startBuild(kind,id,cost,next){update();if(state.queue||!enough(cost))return;RES.forEach((r,i)=>state.stock[r]-=cost[i]);state.queue={kind,id,next,start:now(),end:now()+duration(next)};save();closeModal();render();}
 const $=s=>document.querySelector(s);
 function renderResources(){const el=$('#resources');el.innerHTML=RES.map(r=>`<button class="resource ${state.stock[r]>=availableCap(r)?'full':''}" data-res="${r}"><span class="emoji">${ICON[r]}</span><span class="num">${fmt(state.stock[r])}</span><span class="cap">/ ${fmt(availableCap(r))}</span></button>`).join('');const p=$('#productionPanel');p.classList.toggle('hidden',!resourceOpen);if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{resourceOpen=resourceOpen===b.dataset.res?null:b.dataset.res;renderResources()}))}
+// Fixed field positions on the continuous artwork. Game field IDs and saved data remain unchanged.
+const LAND_PLOTS=[
+ {id:0,x:13.5,y:10.5,w:24,h:16},  // wood top left
+ {id:1,x:50,y:14,w:29,h:14},     // wheat top
+ {id:2,x:15,y:31,w:26,h:17},    // iron left
+ {id:3,x:14,y:53.5,w:27,h:15},  // wheat left
+ {id:4,x:15,y:75,w:28,h:16},    // clay bottom left
+ {id:5,x:86,y:53.5,w:27,h:15},  // wheat right
+ {id:6,x:86,y:10.5,w:24,h:16},  // wood top right
+ {id:7,x:85,y:31,w:26,h:17},    // iron right
+ {id:8,x:50,y:83,w:31,h:16},    // wheat bottom
+ {id:9,x:85,y:75,w:28,h:16}    // clay bottom right
+];
 function renderFields(){
- // Layout is presentation-only: save file field IDs and economic rules stay intact.
- // Four hexes above, three through the center, four below. Middle tile opens the village.
- const positions=[
-  {x:0,y:0,id:0},{x:24.75,y:0,id:1},{x:49.5,y:0,id:2},{x:74.25,y:0,id:3},
-  {x:12.375,y:30,id:4},{x:37.125,y:30,village:true},{x:61.875,y:30,id:5},
-  {x:0,y:60,id:6},{x:24.75,y:60,id:7},{x:49.5,y:60,id:8},{x:74.25,y:60,id:9}
- ];
- const tiles=positions.map(pos=>{
-  if(pos.village)return `<button class="hex-tile hex-village" style="left:${pos.x}%;top:${pos.y}%" data-open-village aria-label="Open dorpskern"><img src="assets/village-v022.png" alt="Dorp" draggable="false"><span class="hex-tag">🏰 Dorp</span></button>`;
+ const spots=LAND_PLOTS.map(pos=>{
   const f=state.fields[pos.id],busy=state.queue?.kind==='field'&&state.queue.id===f.id;
-  return `<button class="hex-tile ${busy?'hex-busy':''}" style="left:${pos.x}%;top:${pos.y}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} niveau ${f.level}"><img src="assets/${f.type}-v022.png" alt="${TYPES[f.type].name}" draggable="false"><span class="hex-level">${busy?'🔨 ':''}${f.level}</span></button>`;
+  return `<button type="button" class="land-hotspot ${busy?'land-busy':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} ${f.id+1}, niveau ${f.level}"><span class="land-level">${busy?'🔨 ':''}${f.level}</span></button>`;
  }).join('');
- return `<div class="scene-head"><div><h1>De landerijen</h1><p>Tik op een hexagon om te verbeteren</p></div><span class="pill">10 velden</span></div><section class="hex-landscape"><div class="hex-board">${tiles}</div><p class="hex-hint">Tik op het dorp in het midden om naar de dorpskern te gaan.</p></section><div class="info-strip"><span>🏡 Basisproductie +25/u</span><span>🔨 Eén bouwproject tegelijk</span></div>`;
+ return `<div class="scene-head"><div><h1>De landerijen</h1><p>Tik op een grondstofgebied om te verbeteren</p></div><span class="pill">10 velden</span></div><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Doorlopend landschap met twee houthakkers, twee mijnen, twee kleigroeven, vier graanvelden en een dorp met brug" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section><p class="land-instruction">Tik op een veld om te upgraden of op het dorp om naar de dorpskern te gaan.</p><div class="info-strip"><span>🏡 Basisproductie +25/u</span><span>🔨 Eén bouwproject tegelijk</span></div>`;
 }
 // v0.3: the village is a visual layout prototype. Keep economy/save schema untouched.
 const VILLAGE_PLOTS=[
