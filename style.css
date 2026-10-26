@@ -94,3 +94,7 @@
 .fixed-wall{left:48%;right:auto;bottom:4%;width:15%;height:13%;transform:translateX(-50%);z-index:8}
 .fixed-wall:not(.is-built){left:auto;right:3%;bottom:3%;transform:none;width:12%;height:12%}
 .fixed-wall.is-built .level-badge{right:9%;bottom:0}
+
+/* v0.7 — barracks asset and building requirements */
+.barracks-option{border-top:1px solid #cdbb98;margin-top:10px;padding-top:12px}
+.locked-choice:disabled{background:#8b8d7b;color:#e6e1d4;opacity:.78}
