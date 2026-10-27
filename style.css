@@ -98,3 +98,10 @@
 /* v0.7 — barracks asset and building requirements */
 .build-option{border-top:1px solid #cdbb98;margin-top:10px;padding-top:12px}
 .locked-choice:disabled{background:#8b8d7b;color:#e6e1d4;opacity:.78}
+
+/* v0.9: rear plots go behind only the actual painted main building, front plots stay in front. */
+.village-plot.village-rear{z-index:3}
+.village-plot.village-front{z-index:5}
+.village-main-foreground{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;z-index:4;pointer-events:none;user-select:none;-webkit-user-drag:none}
+.village-main-hotspot{z-index:7}
+.fixed-hotspot{z-index:8}
