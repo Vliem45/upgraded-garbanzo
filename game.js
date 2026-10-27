@@ -20,7 +20,7 @@ const initial=()=>({
   plots:{},
   stock:{wood:200,clay:200,iron:200,crop:200},
   fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),
-  buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0},
+  buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0,stables:0,residence:0,workshop:0},
   queue:null,
   last:now()
 });
@@ -34,7 +34,7 @@ function load(){
 let state=load(),screen='fields',resourceOpen=null;
 if(!state.plots||typeof state.plots!=='object')state.plots={};
 if(!state.buildings)state.buildings={main:1,warehouse:0,granary:0};
-for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0})){
+for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0,stables:0,residence:0,workshop:0})){
   if(state.buildings[id]==null)state.buildings[id]=def;
 }
 
@@ -67,7 +67,10 @@ const BLD={
   barracks:{name:'Kazerne',icon:'⚔️',base:[100,110,85,65]},
   market:{name:'Marktplaats',icon:'🏪',base:[90,110,70,50]},
   smithy:{name:'Smederij',icon:'⚒️',base:[120,100,130,60]},
-  academy:{name:'Academie',icon:'📚',base:[130,145,100,80]}
+  academy:{name:'Academie',icon:'📚',base:[130,145,100,80]},
+  stables:{name:'Stallen',icon:'🐎',base:[170,150,130,110]},
+  residence:{name:'Residentie',icon:'👑',base:[140,180,120,100]},
+  workshop:{name:'Werkplaats',icon:'🏗️',base:[220,190,240,130]}
 };
 const buildingPrice=(id,lvl)=>BLD[id].base.map(c=>Math.ceil(c*Math.pow(1.3,Math.max(0,lvl-1))));
 const enough=c=>RES.every((r,i)=>state.stock[r]>=c[i]);
@@ -122,6 +125,9 @@ function plotArt(type){
     :type==='market'?'assets/market-v081.png'
     :type==='smithy'?'assets/smithy-v082.png'
     :type==='academy'?'assets/academy-v090.png'
+    :type==='stables'?'assets/stables-v010.png'
+    :type==='residence'?'assets/residence-v010.png'
+    :type==='workshop'?'assets/workshop-v010.png'
     :null;
 }
 function renderVillage(){
@@ -132,7 +138,7 @@ function renderVillage(){
     const art=plotArt(type);
     return `<button class="village-plot ${[1,2,9].includes(p.n)?'village-rear':'village-front'} ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="level-badge">${state.buildings[type]||'🔨'}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
   }).join('');
-  return `<div class="scene-head"><div><h1>De dorpskern</h1><p>Negen vrije bouwplaatsen · plaats je gebouwen zelf</p></div><span class="pill">🏡 Dorp 1</span></div>
+  return `<div class="scene-head"><div><h1>De dorpskern</h1></div><span class="pill">🏡 Dorp 1</span></div>
   <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
     <img class="village-art" src="${wallBuilt?'assets/village-wall-on-v061.webp':'assets/village-wall-off-v061.webp'}" alt="Dorp met hoofdgebouw en negen genummerde kavels; zonder muur of verzamelplaats" draggable="false">
     ${rallyBuilt && !wallBuilt?`<img class="village-rally-overlay" src="assets/rally-v060.png" alt="" draggable="false">`:''}
@@ -142,17 +148,23 @@ function renderVillage(){
     <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
     <button class="fixed-hotspot fixed-wall ${wallBuilt?'is-built':''}" data-building="wall" aria-label="${wallBuilt?'Stadsmuur verbeteren':'Stadsmuur bouwen'}">${wallBuilt?`<span class="level-badge">${state.buildings.wall||1}</span>`:`<span class="fixed-placeholder">🛡️</span>`}</button>
   </section>
-  <p class="note">🏗️ Tik op een lege bouwplaats om gebouwen te bouwen of te plaatsen. De marktplaats ontgrendelt bij hoofdgebouw 3. De kazerne ontgrendelt bij hoofdgebouw 3 en verzamelplaats 1. De smederij en academie ontgrendelen bij hoofdgebouw 5 en kazerne 3.</p>`;
+  `;
 }
 function barracksReady(){return (state.buildings.main||0)>=3 && (state.buildings.rally||0)>=1;}
 function marketReady(){return (state.buildings.main||0)>=3;}
 function smithyReady(){return (state.buildings.main||0)>=5 && (state.buildings.barracks||0)>=3;}
 function academyReady(){return (state.buildings.main||0)>=5 && (state.buildings.barracks||0)>=3;}
+function stablesReady(){return (state.buildings.academy||0)>=5 && (state.buildings.smithy||0)>=3;}
+function residenceReady(){return (state.buildings.main||0)>=5;}
+function workshopReady(){return (state.buildings.main||0)>=10 && (state.buildings.academy||0)>=10;}
 function typeReady(type){
   if(type==='barracks')return barracksReady();
   if(type==='market')return marketReady();
   if(type==='smithy')return smithyReady();
   if(type==='academy')return academyReady();
+  if(type==='stables')return stablesReady();
+  if(type==='residence')return residenceReady();
+  if(type==='workshop')return workshopReady();
   return true;
 }
 function buildRequirementText(type){
@@ -160,6 +172,9 @@ function buildRequirementText(type){
   if(type==='market')return `Vereiste: hoofdgebouw niveau 3 ${(state.buildings.main||0)>=3?'✅':'🔒'}`;
   if(type==='smithy')return `Vereisten: hoofdgebouw niveau 5 ${(state.buildings.main||0)>=5?'✅':'🔒'} · kazerne niveau 3 ${(state.buildings.barracks||0)>=3?'✅':'🔒'}`;
   if(type==='academy')return `Vereisten: hoofdgebouw niveau 5 ${(state.buildings.main||0)>=5?'✅':'🔒'} · kazerne niveau 3 ${(state.buildings.barracks||0)>=3?'✅':'🔒'}`;
+  if(type==='stables')return `Vereisten: academie niveau 5 ${(state.buildings.academy||0)>=5?'✅':'🔒'} · smederij niveau 3 ${(state.buildings.smithy||0)>=3?'✅':'🔒'}`;
+  if(type==='residence')return `Vereiste: hoofdgebouw niveau 5 ${(state.buildings.main||0)>=5?'✅':'🔒'}`;
+  if(type==='workshop')return `Vereisten: hoofdgebouw niveau 10 ${(state.buildings.main||0)>=10?'✅':'🔒'} · academie niveau 10 ${(state.buildings.academy||0)>=10?'✅':'🔒'}`;
   return 'Direct beschikbaar';
 }
 function beginPlacedBuilding(plot,type){
@@ -197,7 +212,7 @@ function showPlot(n){
   update();
   const built=state.plots[n];
   if(built){showBuilding(built);return;}
-  const controls=['warehouse','granary','market','barracks','smithy','academy'].map(buildOptionHtml).filter(Boolean).join('');
+  const controls=['warehouse','granary','market','barracks','smithy','academy','stables','residence','workshop'].map(buildOptionHtml).filter(Boolean).join('');
   modal(`<h2>🏗️ Bouwplaats ${n}</h2><p>Jij bepaalt waar je gebouwen komen te staan.</p>${controls||'<p>Alle beschikbare gebouwen hebben al een plek gekregen. Andere gebouwen volgen later.</p>'}<p class="subtle">Je begint met 600 opslagruimte. Pakhuis en graanschuur verhogen dat naar 800 op niveau 1.</p>`);
   document.querySelectorAll('[data-place-existing]').forEach(b=>b.addEventListener('click',()=>placeExistingBuilding(n,b.dataset.placeExisting)));
   document.querySelectorAll('[data-build-place]').forEach(b=>b.addEventListener('click',()=>beginPlacedBuilding(n,b.dataset.buildPlace)));
@@ -248,6 +263,9 @@ function showBuilding(id){
     id==='market'?'De marktplaats wordt later de plek voor handel en transport. Voor nu kun je hem bouwen en verbeteren.':
     id==='smithy'?'De smederij wordt later de plek om wapens en uitrusting te verbeteren. Voor nu kun je hem bouwen en verbeteren.':
     id==='academy'?'De academie wordt later de plek om nieuwe troepensoorten te onderzoeken. Je kunt haar nu bouwen en verbeteren.':
+    id==='stables'?'Hier trainen we later onze cavalerie. Nu kun je de stallen bouwen en verbeteren.':
+    id==='residence'?'De residentie wordt later belangrijk bij het stichten en beheren van nieuwe dorpen.':
+    id==='workshop'?'Hier bouwen we later belegeringswerktuigen zoals stormrammen en katapulten.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
