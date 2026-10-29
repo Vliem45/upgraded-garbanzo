@@ -154,3 +154,6 @@
 .village-plot.plot-2.village-occupied{left:79%!important;top:34%!important}
 /* Keep the full front fence legible without hiding the building-level markers. */
 .village-plot .level-badge{z-index:10}
+
+/* v0.11.2: palisade is painted into the two matching complete backgrounds. */
+.village-wall-rear-v0111,.village-wall-front-v0111{display:none!important}
