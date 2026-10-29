@@ -114,9 +114,9 @@ function renderFields(){
 }
 
 const VILLAGE_PLOTS=[
- {n:1,x:65,y:18},{n:2,x:77,y:29},{n:3,x:77,y:45},
- {n:4,x:74,y:61},{n:5,x:49,y:68},{n:6,x:26,y:61},
- {n:7,x:23,y:45},{n:8,x:23,y:29},{n:9,x:35,y:18}
+ {n:1,x:67,y:26},{n:2,x:79,y:35},{n:3,x:80,y:46},
+ {n:4,x:75,y:57},{n:5,x:50,y:63},{n:6,x:24,y:57},
+ {n:7,x:20,y:46},{n:8,x:20,y:35},{n:9,x:33,y:26}
 ];
 function plotArt(type){
   return type==='warehouse'?'assets/warehouse-v050.png'
@@ -140,10 +140,10 @@ function renderVillage(){
   }).join('');
   return `<div class="scene-head"><div><h1>De dorpskern</h1></div><span class="pill">🏡 Dorp 1</span></div>
   <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
-    <img class="village-art" src="${wallBuilt?'assets/village-wall-on-v061.webp':'assets/village-wall-off-v061.webp'}" alt="Dorp met hoofdgebouw en negen genummerde kavels; zonder muur of verzamelplaats" draggable="false">
-    ${rallyBuilt && !wallBuilt?`<img class="village-rally-overlay" src="assets/rally-v060.png" alt="" draggable="false">`:''}
+    <img class="village-art" src="assets/village-layout-v011.png" alt="Dorpskern met hoofdgebouw, negen bouwplaatsen, een rivier en brug" draggable="false">
+    ${wallBuilt?`<img class="village-wall-v011" src="assets/wall-v060.png" alt="" draggable="false">`:''}
+    ${rallyBuilt?`<img class="village-rally-v011" src="assets/rally-v060.png" alt="" draggable="false">`:''}
     ${plots}
-    <img class="village-main-foreground" src="assets/main-foreground-${wallBuilt?'on':'off'}-v090.png" alt="" aria-hidden="true" draggable="false">
     <button class="village-main-hotspot" data-building="main" aria-label="Hoofdgebouw verbeteren"><span class="level-badge">${state.buildings.main||1}</span></button>
     <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
     <button class="fixed-hotspot fixed-wall ${wallBuilt?'is-built':''}" data-building="wall" aria-label="${wallBuilt?'Stadsmuur verbeteren':'Stadsmuur bouwen'}">${wallBuilt?`<span class="level-badge">${state.buildings.wall||1}</span>`:`<span class="fixed-placeholder">🛡️</span>`}</button>
@@ -258,7 +258,7 @@ function affordability(cost){
   const clock=date.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
   const day=date.toLocaleDateString('nl-NL',{weekday:'long',day:'numeric',month:'long'});
   const today=new Date().toDateString()===date.toDateString();
-  return `<p class="affordability">🕒 Voldoende grondstoffen ${today?'vandaag':'op '+day} om <b>${clock}</b><small>Bij gelijkblijvende productie en zonder andere uitgaven.</small></p>`;
+  return `<p class="affordability">🕒 Voldoende grondstoffen ${today?'vandaag':'op '+day} om <b>${clock}</b></p>`;
 }
 // Project Kingdom v0.10.1: estimate affordability using current production.
 function affordability(cost){
@@ -277,7 +277,7 @@ function affordability(cost){
   const clock=date.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
   const day=date.toLocaleDateString('nl-NL',{weekday:'long',day:'numeric',month:'long'});
   const today=new Date().toDateString()===date.toDateString();
-  return `<p class="affordability">🕒 Voldoende grondstoffen ${today?'vandaag':'op '+day} om <b>${clock}</b><small>Bij gelijkblijvende productie en zonder andere uitgaven.</small></p>`;
+  return `<p class="affordability">🕒 Voldoende grondstoffen ${today?'vandaag':'op '+day} om <b>${clock}</b></p>`;
 }
 function costHtml(cost){return `<div class="cost-grid">${cost.map((c,i)=>`<div class="cost ${state.stock[RES[i]]<c?'insufficient':''}">${ICON[RES[i]]}<br><b>${fmt(c)}</b></div>`).join('')}</div>`}
 function showField(id){

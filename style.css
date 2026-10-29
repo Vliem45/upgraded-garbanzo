@@ -121,3 +121,22 @@
 .affordability small{display:block;font-size:11px;opacity:.75;margin-top:4px}
 .affordability.warning{background:#f0e0cf;border-left-color:#b27440}
 .affordability.ready{background:#e1ead7;border-left-color:#578653}
+
+/* v0.11 test: portrait village. Positions apply exclusively to this map. */
+.village-layout{aspect-ratio:4 / 5;background:#486e42;}
+.village-art{object-fit:contain;}
+.village-wall-v011{position:absolute;left:0;top:4%;width:100%;height:82%;object-fit:fill;pointer-events:none;z-index:2;}
+.village-rally-v011{position:absolute;left:50%;top:51%;width:23%;height:15%;object-fit:contain;transform:translate(-50%,-50%);pointer-events:none;z-index:3;filter:drop-shadow(1px 2px 2px #17281855);}
+.village-plot{width:18%;height:12%;z-index:5;}
+.village-plot.village-occupied{width:21%;height:15%;z-index:5;}
+.village-plot.village-rear,.village-plot.village-front{z-index:5;}
+.building-asset{width:122%;height:122%;top:48%;}
+.village-main-hotspot{left:50%;top:34%;width:25%;height:18%;z-index:7;}
+.village-main-hotspot .level-badge{right:6%;bottom:8%;}
+.fixed-rally{left:50%;top:51%;width:23%;height:15%;z-index:8;}
+.fixed-rally.is-built .level-badge{right:5%;bottom:8%;}
+.fixed-wall,.fixed-wall.is-built{left:50%;right:auto;bottom:21%;width:17%;height:10%;transform:translateX(-50%);z-index:8;}
+.fixed-wall:not(.is-built){left:88%;right:auto;bottom:21%;width:12%;height:9%;transform:translateX(-50%);}
+.fixed-wall.is-built .level-badge{right:0;bottom:0;}
+.village-plot .plot-number{opacity:0;}
+/* Building spots are already numbered on the illustration. */
