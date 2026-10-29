@@ -105,3 +105,19 @@
 .village-main-foreground{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;z-index:4;pointer-events:none;user-select:none;-webkit-user-drag:none}
 .village-main-hotspot{z-index:7}
 .fixed-hotspot{z-index:8}
+
+/* v0.10.1: smaller level badges so buildings remain visible */
+.village-plot.village-occupied .level-badge{right:4%;bottom:2%;min-width:20px;height:20px;padding:0 5px;font-size:11px;border-width:1px;}
+.village-main-hotspot .level-badge,.fixed-hotspot .level-badge{min-width:21px;height:21px;padding:0 5px;font-size:11px;}
+.affordability{margin:10px 0;padding:10px 12px;background:#e9e0c8;border-left:3px solid #93713b;border-radius:7px;color:#443b2b;font-size:13px;line-height:1.4}
+.affordability small{display:block;font-size:11px;opacity:.75;margin-top:4px}
+.affordability.warning{background:#f0e0cf;border-left-color:#b27440}
+.affordability.ready{background:#e1ead7;border-left-color:#578653}
+
+/* v0.10.1: smaller level badges so buildings remain visible */
+.village-plot.village-occupied .level-badge{right:4%;bottom:2%;min-width:20px;height:20px;padding:0 5px;font-size:11px;border-width:1px;}
+.village-main-hotspot .level-badge,.fixed-hotspot .level-badge{min-width:21px;height:21px;padding:0 5px;font-size:11px;}
+.affordability{margin:10px 0;padding:10px 12px;background:#e9e0c8;border-left:3px solid #93713b;border-radius:7px;color:#443b2b;font-size:13px;line-height:1.4}
+.affordability small{display:block;font-size:11px;opacity:.75;margin-top:4px}
+.affordability.warning{background:#f0e0cf;border-left-color:#b27440}
+.affordability.ready{background:#e1ead7;border-left-color:#578653}

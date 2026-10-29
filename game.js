@@ -125,7 +125,7 @@ function plotArt(type){
     :type==='market'?'assets/market-v081.png'
     :type==='smithy'?'assets/smithy-v082.png'
     :type==='academy'?'assets/academy-v090.png'
-    :type==='stables'?'assets/stables-v010.png'
+    :type==='stables'?'assets/stables-v011.png'
     :type==='residence'?'assets/residence-v010.png'
     :type==='workshop'?'assets/workshop-v010.png'
     :null;
@@ -206,7 +206,7 @@ function buildOptionHtml(type){
   const actionAttr=placeOnly?`data-place-existing="${type}"`:`data-build-place="${type}"`;
   const details=buildRequirementText(type);
   const costs=placeOnly?`<p class="subtle">Dit gebouw is al gebouwd en kan gratis op een vrije plek worden neergezet.</p>`:`<p class="subtle">Bouwkosten: 🪵 ${fmt(cost[0])} · 🧱 ${fmt(cost[1])} · ⛏️ ${fmt(cost[2])} · 🌾 ${fmt(cost[3])}</p>`;
-  return `<div class="build-option"><button class="action ${!placeOnly&&!ready?'locked-choice':''}" ${actionAttr} ${disabled?'disabled':''}>${title}</button><div class="subtle">${details}</div>${costs}</div>`;
+  return `<div class="build-option"><button class="action ${!placeOnly&&!ready?'locked-choice':''}" ${actionAttr} ${disabled?'disabled':''}>${title}</button><div class="subtle">${details}</div>${costs}${!placeOnly&&ready?affordability(cost):''}</div>`;
 }
 function showPlot(n){
   update();
@@ -241,11 +241,49 @@ function render(){
 }
 function modal(html){$('#modal').innerHTML=`<button class="close" aria-label="Sluiten" id="closeModal">✕</button>`+html;$('#modalBackdrop').classList.remove('hidden');$('#closeModal').onclick=closeModal}
 function closeModal(){$('#modalBackdrop').classList.add('hidden')}
+// Project Kingdom v0.10.1: estimate affordability using current production.
+function affordability(cost){
+  const missing=RES.map((r,i)=>({r,needed:cost[i],have:state.stock[r],rate:perHour(r),cap:availableCap(r)}));
+  const blocked=missing.filter(x=>x.needed>x.cap);
+  if(blocked.length){
+    const names=blocked.map(x=>x.r==='crop'?'graanschuur':'pakhuis');
+    const unique=[...new Set(names)];
+    return `<p class="affordability warning">📦 Opslag te klein voor deze upgrade. Verbeter eerst ${unique.length===2?'je pakhuis en graanschuur':unique[0]==='pakhuis'?'je pakhuis':'je graanschuur'}.</p>`;
+  }
+  if(enough(cost))return '<p class="affordability ready">✓ Voldoende grondstoffen: je kunt bouwen.</p>';
+  // Real stock accumulates until capped; the slowest resource sets the target.
+  const hours=Math.max(...missing.map(x=>Math.max(0,x.needed-x.have)/x.rate));
+  if(!Number.isFinite(hours))return '<p class="affordability warning">Geen productie voor een benodigde grondstof.</p>';
+  const date=new Date(now()+Math.ceil(hours*3600000));
+  const clock=date.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
+  const day=date.toLocaleDateString('nl-NL',{weekday:'long',day:'numeric',month:'long'});
+  const today=new Date().toDateString()===date.toDateString();
+  return `<p class="affordability">🕒 Voldoende grondstoffen ${today?'vandaag':'op '+day} om <b>${clock}</b><small>Bij gelijkblijvende productie en zonder andere uitgaven.</small></p>`;
+}
+// Project Kingdom v0.10.1: estimate affordability using current production.
+function affordability(cost){
+  const missing=RES.map((r,i)=>({r,needed:cost[i],have:state.stock[r],rate:perHour(r),cap:availableCap(r)}));
+  const blocked=missing.filter(x=>x.needed>x.cap);
+  if(blocked.length){
+    const names=blocked.map(x=>x.r==='crop'?'graanschuur':'pakhuis');
+    const unique=[...new Set(names)];
+    return `<p class="affordability warning">📦 Opslag te klein voor deze upgrade. Verbeter eerst ${unique.length===2?'je pakhuis en graanschuur':unique[0]==='pakhuis'?'je pakhuis':'je graanschuur'}.</p>`;
+  }
+  if(enough(cost))return '<p class="affordability ready">✓ Voldoende grondstoffen: je kunt bouwen.</p>';
+  // Real stock accumulates until capped; the slowest resource sets the target.
+  const hours=Math.max(...missing.map(x=>Math.max(0,x.needed-x.have)/x.rate));
+  if(!Number.isFinite(hours))return '<p class="affordability warning">Geen productie voor een benodigde grondstof.</p>';
+  const date=new Date(now()+Math.ceil(hours*3600000));
+  const clock=date.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
+  const day=date.toLocaleDateString('nl-NL',{weekday:'long',day:'numeric',month:'long'});
+  const today=new Date().toDateString()===date.toDateString();
+  return `<p class="affordability">🕒 Voldoende grondstoffen ${today?'vandaag':'op '+day} om <b>${clock}</b><small>Bij gelijkblijvende productie en zonder andere uitgaven.</small></p>`;
+}
 function costHtml(cost){return `<div class="cost-grid">${cost.map((c,i)=>`<div class="cost ${state.stock[RES[i]]<c?'insufficient':''}">${ICON[RES[i]]}<br><b>${fmt(c)}</b></div>`).join('')}</div>`}
 function showField(id){
   update();
   let f=state.fields[id],t=TYPES[f.type],next=f.level+1,cost=price(f.type,f.level),busy=!!state.queue;
-  modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);
+  modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);
   $('#doBuild').onclick=()=>startBuild('field',id,cost,next);
 }
 function showBuilding(id){
@@ -267,7 +305,7 @@ function showBuilding(id){
     id==='residence'?'De residentie wordt later belangrijk bij het stichten en beheren van nieuwe dorpen.':
     id==='workshop'?'Hier bouwen we later belegeringswerktuigen zoals stormrammen en katapulten.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
-  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
+  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
 }
 $('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij en academie ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
