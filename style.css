@@ -140,3 +140,17 @@
 .fixed-wall.is-built .level-badge{right:0;bottom:0;}
 .village-plot .plot-number{opacity:0;}
 /* Building spots are already numbered on the illustration. */
+
+/* v0.11.1: background palisade sits behind houses, foreground palisade sits in front. */
+.village-wall-v011{display:none!important}
+.village-wall-rear-v0111,.village-wall-front-v0111{position:absolute;left:0;top:4%;width:100%;height:82%;object-fit:fill;pointer-events:none;user-select:none;-webkit-user-select:none}
+.village-wall-rear-v0111{z-index:2}
+.village-wall-front-v0111{z-index:6}
+.village-main-hotspot,.fixed-hotspot{z-index:9}
+/* A little extra space between the workshop, academy and the stables. */
+.village-plot.plot-2.village-occupied,.village-plot.plot-3.village-occupied,.village-plot.plot-4.village-occupied{width:19%;height:14%}
+.village-plot.plot-4.village-occupied{left:78%!important;top:58%!important}
+.village-plot.plot-3.village-occupied{left:82%!important;top:46%!important}
+.village-plot.plot-2.village-occupied{left:79%!important;top:34%!important}
+/* Keep the full front fence legible without hiding the building-level markers. */
+.village-plot .level-badge{z-index:10}

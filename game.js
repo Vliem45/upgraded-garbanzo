@@ -125,7 +125,7 @@ function plotArt(type){
     :type==='market'?'assets/market-v081.png'
     :type==='smithy'?'assets/smithy-v082.png'
     :type==='academy'?'assets/academy-v090.png'
-    :type==='stables'?'assets/stables-v011.png'
+    :type==='stables'?'assets/stables-v0111.png'
     :type==='residence'?'assets/residence-v010.png'
     :type==='workshop'?'assets/workshop-v010.png'
     :null;
@@ -136,14 +136,15 @@ function renderVillage(){
   const plots=VILLAGE_PLOTS.map(p=>{
     const type=state.plots[p.n];
     const art=plotArt(type);
-    return `<button class="village-plot ${[1,2,9].includes(p.n)?'village-rear':'village-front'} ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="level-badge">${state.buildings[type]||'🔨'}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
+    return `<button class="village-plot plot-${p.n} ${[1,2,9].includes(p.n)?'village-rear':'village-front'} ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="level-badge">${state.buildings[type]||'🔨'}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
   }).join('');
   return `<div class="scene-head"><div><h1>De dorpskern</h1></div><span class="pill">🏡 Dorp 1</span></div>
   <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
     <img class="village-art" src="assets/village-layout-v011.png" alt="Dorpskern met hoofdgebouw, negen bouwplaatsen, een rivier en brug" draggable="false">
-    ${wallBuilt?`<img class="village-wall-v011" src="assets/wall-v060.png" alt="" draggable="false">`:''}
+    ${wallBuilt?`<img class="village-wall-rear-v0111" src="assets/wall-rear-v0111.png" alt="" draggable="false">`:''}
     ${rallyBuilt?`<img class="village-rally-v011" src="assets/rally-v060.png" alt="" draggable="false">`:''}
     ${plots}
+    ${wallBuilt?`<img class="village-wall-front-v0111" src="assets/wall-front-v0111.png" alt="" draggable="false">`:''}
     <button class="village-main-hotspot" data-building="main" aria-label="Hoofdgebouw verbeteren"><span class="level-badge">${state.buildings.main||1}</span></button>
     <button class="fixed-hotspot fixed-rally ${rallyBuilt?'is-built':''}" data-building="rally" aria-label="${rallyBuilt?'Verzamelplaats verbeteren':'Verzamelplaats bouwen'}">${rallyBuilt?`<span class="level-badge">${state.buildings.rally||1}</span>`:`<span class="fixed-placeholder">🚩</span>`}</button>
     <button class="fixed-hotspot fixed-wall ${wallBuilt?'is-built':''}" data-building="wall" aria-label="${wallBuilt?'Stadsmuur verbeteren':'Stadsmuur bouwen'}">${wallBuilt?`<span class="level-badge">${state.buildings.wall||1}</span>`:`<span class="fixed-placeholder">🛡️</span>`}</button>
