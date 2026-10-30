@@ -39,11 +39,12 @@ for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:
 }
 
 // Units persist inside the original village save, alongside world state.
-const SCOUT_COST=[160,100,50,50],SCOUT_TRAIN_MS=1400000,SCOUT_STEP_MS=400000;
+const SCOUT_COST=[160,100,50,50],SCOUT_TRAIN_MS=600000,SCOUT_STEP_MS=400000;
 function initScouts(){
  if(!state.army||typeof state.army!=='object')state.army={scouts:1,training:[],scout:{q:0,r:0,travel:null}};
  if(!Number.isFinite(state.army.scouts))state.army.scouts=1;
  if(!Array.isArray(state.army.training))state.army.training=[];
+ if(!state.army.trainingStarted||typeof state.army.trainingStarted!=='object')state.army.trainingStarted={};
  if(!state.army.scout)state.army.scout={q:0,r:0,travel:null};
  if(!Number.isInteger(state.army.scout.q))state.army.scout.q=0;
  if(!Number.isInteger(state.army.scout.r))state.army.scout.r=0;
@@ -51,7 +52,7 @@ function initScouts(){
 function upkeepPerHour(){return state.army?state.army.scouts:0}
 function finishArmyTimers(time){
  initScouts();let changed=false;
- while(state.army.training.length&&state.army.training[0]<=time){state.army.training.shift();state.army.scouts++;changed=true;}
+ while(state.army.training.length&&state.army.training[0]<=time){const done=state.army.training.shift();delete state.army.trainingStarted[String(done)];state.army.scouts++;changed=true;}
  const scout=state.army.scout;
  if(scout.travel&&time>=scout.travel.end){
   scout.q=scout.travel.q;scout.r=scout.travel.r;scout.travel=null;
@@ -307,7 +308,7 @@ function setupWorld(){
   }
   const scout=state.army.scout,spot=at(scout.q,scout.r);
   ctx.fillStyle='#fce3a7';ctx.strokeStyle='#183b28';ctx.lineWidth=3;ctx.beginPath();ctx.arc(spot.x,spot.y-16,8,0,Math.PI*2);ctx.fill();ctx.stroke();
-  ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('🧭',spot.x,spot.y-12);
+  ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('🚶',spot.x,spot.y-12);
   if(scout.travel){const goal=at(scout.travel.q,scout.travel.r);ctx.strokeStyle='#f7d78b';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(spot.x,spot.y-16);ctx.lineTo(goal.x,goal.y-16);ctx.stroke();ctx.setLineDash([]);}
   ctx.restore();
  };
@@ -364,6 +365,7 @@ function render(){
     if(screen==='map')setupWorld();
   }
   renderQueue();
+  refreshLiveTimers();
   if(screen==='map'){
     const status=$('#scoutStatus'),sc=state.army.scout;
     if(status)status.textContent=sc.travel?`🧭 Verkenner onderweg naar ${sc.travel.q} | ${sc.travel.r}. Nog ${Math.max(0,Math.ceil((sc.travel.end-now())/60_000))} minuten.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een aangrenzende zeshoek om te reizen (6:40 per veld).`;
@@ -423,6 +425,25 @@ function showField(id){
   modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);
   $('#doBuild').onclick=()=>startBuild('field',id,cost,next);
 }
+
+// v0.12.2: render read-only timer values without recreating open modals every second.
+function clockTime(ms){let sec=Math.max(0,Math.ceil(ms/1000));return `${Math.floor(sec/3600)>0?String(Math.floor(sec/3600))+':':''}${String(Math.floor(sec%3600/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
+function troopAtHome(){let sc=state.army.scout;return Math.max(0,state.army.scouts-((sc.travel||sc.q!==0||sc.r!==0)?1:0))}
+function scoutingHtml(){
+ const a=state.army,sc=a.scout,t=a.training[0],ts=a.trainingStarted||{};
+ let first=t?`<div class="pk-timer-row"><b>Volgende verkenner klaar over</b><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}" style="width:0%"></div></div>`:'<p class="subtle">Geen verkenners in training.</p>';
+ let expedition=sc.travel?`<div class="pk-movement"><b>🧭 Ontdekking · heenreis</b><p>Troepen: 1 verkenner<br>Van: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
+ (sc.q!==0||sc.r!==0?`<div class="pk-movement"><b>🧭 Op verkenning</b><p>1 verkenner bevindt zich op <b>${sc.q} | ${sc.r}</b> en wacht op een nieuwe opdracht.</p></div>`:'<p class="subtle">Er zijn geen troepen onderweg.</p>');
+ return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${a.training.length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik beschikbare verkenners: <b>${a.scouts} per uur</b></p><h3>Troepenbewegingen</h3>${expedition}<h3>Training</h3><p>In training: <b>${a.training.length}</b></p>${first}</section>`;
+}
+function refreshLiveTimers(){
+ const m=document.getElementById('modal');if(!m||document.getElementById('modalBackdrop').classList.contains('hidden'))return;
+ m.querySelectorAll('[data-timer-end]').forEach(el=>el.textContent=clockTime(Number(el.dataset.timerEnd)-now()));
+ m.querySelectorAll('[data-training-progress]').forEach(el=>{const end=Number(el.dataset.trainingProgress),start=Number(el.dataset.trainingStart);el.style.width=`${Math.max(0,Math.min(100,100*(now()-start)/Math.max(1,end-start)))}%`});
+ // On completion refresh the modal once to update unit counts without losing an active interaction.
+ const preview=m.querySelector('[data-army-training-count]');if(preview&&Number(preview.dataset.armyTrainingCount)!==state.army.training.length){const id=preview.dataset.armyBuilding;if(id)showBuilding(id)}
+}
+
 function showBuilding(id){
   if(!BLD[id])return;
   update();
@@ -444,12 +465,14 @@ function showBuilding(id){
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
+  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());}
   if(id==='barracks'&&(state.buildings.barracks||0)>=1){
     const sc=state.army.scout,wait=state.army.training.length;
     const card=document.createElement('div');card.className='scout-training';
-    card.innerHTML=`<hr><h3>🧭 Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Training:</b> 23:20 per verkenner</p>${costHtml(SCOUT_COST)}<button type="button" class="action" id="trainScout" ${!enough(SCOUT_COST)?'disabled':''}>Train één verkenner</button>`;
+    const t=state.army.training[0],ts=state.army.trainingStarted||{};
+    card.innerHTML=`<div data-army-training-count="${wait}" data-army-building="barracks"><hr><h3>🧭 Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Basistraining:</b> 10:00 per verkenner</p>${t?`<div class="pk-timer-row"><span>Volgende gereed over</span><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}"></div></div>`:''}${costHtml(SCOUT_COST)}<button type="button" class="action" id="trainScout" ${!enough(SCOUT_COST)?'disabled':''}>Train één verkenner</button></div>`;
     $('#modal').appendChild(card);
-    $('#trainScout').onclick=()=>{update();if(!enough(SCOUT_COST))return;RES.forEach((r,i)=>state.stock[r]-=SCOUT_COST[i]);const times=state.army.training;times.push(Math.max(now(),times.length?times[times.length-1]:0)+SCOUT_TRAIN_MS);save();showBuilding('barracks');renderResources()};
+    $('#trainScout').onclick=()=>{update();if(!enough(SCOUT_COST))return;RES.forEach((r,i)=>state.stock[r]-=SCOUT_COST[i]);const times=state.army.training;const start=Math.max(now(),times.length?times[times.length-1]:0);const finish=start+SCOUT_TRAIN_MS;times.push(finish);state.army.trainingStarted[String(finish)]=start;save();showBuilding('barracks');renderResources()};
   }
 }
 $('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij en academie ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
