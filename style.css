@@ -170,3 +170,6 @@
 
 /* v0.12.2 troop overview / progress indicators */
 .pk-army{margin-top:18px}.pk-army h3{margin:15px 0 10px;font-size:18px}.pk-army hr{border:0;border-top:1px solid #baa77d;margin:18px 0}.pk-army-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.pk-army-stats>div{background:#e1d0aa;border-radius:10px;text-align:center;padding:10px 4px}.pk-army-stats b{display:block;font-size:20px}.pk-army-stats small{font-size:11px}.pk-movement{border:1px solid #c9b58b;background:#e7d9b8;border-radius:12px;padding:12px}.pk-movement p{margin:8px 0}.pk-timer-row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:10px 0;font-size:14px}.pk-timer-row strong{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:18px}.pk-training-meter{background:#c4b58e;margin:8px 0 14px}.pk-training-meter>div{background:#547b47}.scout-training .pk-timer-row{margin-top:15px}
+
+/* v0.12.3 batch barracks training */
+.pk-batch{margin-top:14px}.pk-batch-row{display:flex;gap:10px;align-items:stretch;margin:9px 0}.pk-batch-row input{min-width:0;width:50%;flex:1;background:#fff6df;border:1px solid #b9a879;border-radius:9px;padding:10px 12px;font-size:18px;color:#283523}.pk-batch-row .small-btn{flex:0 0 auto;margin:0;padding:10px 12px}.pk-batch .action{margin-top:15px}

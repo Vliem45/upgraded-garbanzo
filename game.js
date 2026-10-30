@@ -46,10 +46,42 @@ function initScouts(){
  if(!Array.isArray(state.army.training))state.army.training=[];
  if(!state.army.trainingStarted||typeof state.army.trainingStarted!=='object')state.army.trainingStarted={};
  if(!state.army.scout)state.army.scout={q:0,r:0,travel:null};
+ if(!Number.isFinite(state.army.starvationProgress))state.army.starvationProgress=0;
+ if(!Array.isArray(state.army.losses))state.army.losses=[];
  if(!Number.isInteger(state.army.scout.q))state.army.scout.q=0;
  if(!Number.isInteger(state.army.scout.r))state.army.scout.r=0;
 }
 function upkeepPerHour(){return state.army?state.army.scouts:0}
+function maxScoutOrder(){return Math.max(0,Math.min(500,...RES.map((r,i)=>Math.floor((state.stock[r]+0.000001)/SCOUT_COST[i]))))}
+function applyCropInterval(hours){
+ if(hours<=0)return;
+ let crop=state.stock.crop,prod=perHour('crop'),remaining=hours,guard=0;
+ while(remaining>1e-10 && guard++<10000){
+  const deficit=upkeepPerHour()-prod;
+  if(deficit<=0){crop=Math.min(availableCap('crop'),crop-deficit*remaining);break;}
+  if(crop>0){const toZero=crop/deficit;const step=Math.min(remaining,toZero);crop=Math.max(0,crop-deficit*step);remaining-=step;if(remaining<1e-10)break;}
+  if(state.army.scouts<=0){crop=Math.min(availableCap('crop'),crop+prod*remaining);break;}
+  const progress=state.army.starvationProgress||0;
+  const timeUntilDeath=Math.max(0,(1-progress)/deficit);
+  if(remaining+1e-10<timeUntilDeath){state.army.starvationProgress=progress+remaining*deficit;remaining=0;break;}
+  remaining-=timeUntilDeath;state.army.starvationProgress=0;
+  state.army.scouts=Math.max(0,state.army.scouts-1);
+  state.army.losses.push({time:Date.now(),kind:'scout',reason:'starvation',count:1});
+  if(state.army.losses.length>30)state.army.losses=state.army.losses.slice(-30);
+  // A lone scout on the map is lost only if no stationed scout remains.
+  if(state.army.scouts===0){state.army.scout.travel=null;state.army.scout.q=0;state.army.scout.r=0;}
+ }
+ state.stock.crop=Math.max(0,Math.min(availableCap('crop'),crop));
+ if(state.stock.crop>0||upkeepPerHour()<=perHour('crop'))state.army.starvationProgress=0;
+}
+function applyResourceInterval(from,to){
+ let hours=Math.max(0,to-from)/3600000;if(!hours)return;
+ for(const r of ['wood','clay','iron'])state.stock[r]=Math.max(0,Math.min(availableCap(r),state.stock[r]+perHour(r)*hours));
+ applyCropInterval(hours);
+}
+function resolveArmyTraining(time){
+ while(state.army.training.length&&state.army.training[0]<=time){const done=state.army.training.shift();delete state.army.trainingStarted[String(done)];state.army.scouts++;}
+}
 function finishArmyTimers(time){
  initScouts();let changed=false;
  while(state.army.training.length&&state.army.training[0]<=time){const done=state.army.training.shift();delete state.army.trainingStarted[String(done)];state.army.scouts++;changed=true;}
@@ -66,21 +98,28 @@ function finishArmyTimers(time){
 const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse']||0);
 function perHour(r){return 25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0)}
 function update(){
-  let t=now();
-  initWorld();initScouts();finishArmyTimers(t);let until=state.queue?Math.min(t,state.queue.end):t;
-  let dt=Math.max(0,until-state.last)/3600000;
-  for(const r of RES) state.stock[r]=Math.max(0,Math.min(availableCap(r),state.stock[r]+(perHour(r)-(r==='crop'?upkeepPerHour():0))*dt));
-  if(state.queue&&t>=state.queue.end){
-    const q=state.queue;
-    if(q.kind==='field')state.fields[q.id].level++;
-    if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;
-    state.queue=null;
-    let after=Math.max(0,t-until)/3600000;
-    for(const r of RES)state.stock[r]=Math.max(0,Math.min(availableCap(r),state.stock[r]+(perHour(r)-(r==='crop'?upkeepPerHour():0))*after))
+ const t=now();initWorld();initScouts();
+ let cursor=Math.min(t,state.last||t),safety=0;
+ // Event-based offline progression: finish construction and training in chronological order.
+ while(cursor<t&&safety++<10000){
+  let boundary=t;
+  if(state.queue&&state.queue.end>cursor)boundary=Math.min(boundary,state.queue.end);
+  if(state.army.training.length&&state.army.training[0]>cursor)boundary=Math.min(boundary,state.army.training[0]);
+  applyResourceInterval(cursor,boundary);cursor=boundary;
+  if(state.queue&&state.queue.end<=cursor){
+   const q=state.queue;
+   if(q.kind==='field')state.fields[q.id].level++;
+   if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;
+   state.queue=null;
   }
-  state.last=t;
-  save();
+  resolveArmyTraining(cursor);
+ }
+ // Legacy saves may have timers ending before their saved last-update timestamp.
+ if(state.queue&&state.queue.end<=t){const q=state.queue;if(q.kind==='field')state.fields[q.id].level++;if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;state.queue=null;}
+ resolveArmyTraining(t);finishArmyTimers(t);
+ state.last=t;save();
 }
+
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch{}}
 function price(type,level){return TYPES[type].base.map(x=>Math.ceil(x*Math.pow(1.3,level)))}
 const BLD={
@@ -434,7 +473,7 @@ function scoutingHtml(){
  let first=t?`<div class="pk-timer-row"><b>Volgende verkenner klaar over</b><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}" style="width:0%"></div></div>`:'<p class="subtle">Geen verkenners in training.</p>';
  let expedition=sc.travel?`<div class="pk-movement"><b>🧭 Ontdekking · heenreis</b><p>Troepen: 1 verkenner<br>Van: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
  (sc.q!==0||sc.r!==0?`<div class="pk-movement"><b>🧭 Op verkenning</b><p>1 verkenner bevindt zich op <b>${sc.q} | ${sc.r}</b> en wacht op een nieuwe opdracht.</p></div>`:'<p class="subtle">Er zijn geen troepen onderweg.</p>');
- return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${a.training.length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik beschikbare verkenners: <b>${a.scouts} per uur</b></p><h3>Troepenbewegingen</h3>${expedition}<h3>Training</h3><p>In training: <b>${a.training.length}</b></p>${first}</section>`;
+ return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${a.training.length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik verkenners: <b>${a.scouts} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}<h3>Training</h3><p>In training: <b>${a.training.length}</b></p>${first}</section>`;
 }
 function refreshLiveTimers(){
  const m=document.getElementById('modal');if(!m||document.getElementById('modalBackdrop').classList.contains('hidden'))return;
@@ -470,9 +509,29 @@ function showBuilding(id){
     const sc=state.army.scout,wait=state.army.training.length;
     const card=document.createElement('div');card.className='scout-training';
     const t=state.army.training[0],ts=state.army.trainingStarted||{};
-    card.innerHTML=`<div data-army-training-count="${wait}" data-army-building="barracks"><hr><h3>🧭 Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Basistraining:</b> 10:00 per verkenner</p>${t?`<div class="pk-timer-row"><span>Volgende gereed over</span><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}"></div></div>`:''}${costHtml(SCOUT_COST)}<button type="button" class="action" id="trainScout" ${!enough(SCOUT_COST)?'disabled':''}>Train één verkenner</button></div>`;
+    card.innerHTML=`<div data-army-training-count="${wait}" data-army-building="barracks"><hr><h3>🧭 Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Basistraining:</b> 10:00 per verkenner</p>${t?`<div class="pk-timer-row"><span>Volgende gereed over</span><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-600000}"></div></div>`:''}<div class="pk-batch"><label for="scoutAmount">Aantal verkenners</label><div class="pk-batch-row"><input type="number" inputmode="numeric" min="1" max="500" step="1" id="scoutAmount" value="1"><button type="button" class="small-btn" id="scoutMax">Maximum (${maxScoutOrder()})</button></div><p class="subtle" id="scoutTotalTime"></p><p><b>Totale kosten</b></p><div id="scoutCostPreview"></div><button type="button" class="action" id="trainScout">Train verkenners</button></div></div>`;
     $('#modal').appendChild(card);
-    $('#trainScout').onclick=()=>{update();if(!enough(SCOUT_COST))return;RES.forEach((r,i)=>state.stock[r]-=SCOUT_COST[i]);const times=state.army.training;const start=Math.max(now(),times.length?times[times.length-1]:0);const finish=start+SCOUT_TRAIN_MS;times.push(finish);state.army.trainingStarted[String(finish)]=start;save();showBuilding('barracks');renderResources()};
+    const quantity=$('#scoutAmount'),train=$('#trainScout'),preview=$('#scoutCostPreview'),timing=$('#scoutTotalTime');
+    function selection(){
+      const n=Number(quantity.value),valid=Number.isSafeInteger(n)&&n>=1&&n<=500;
+      const costs=SCOUT_COST.map(c=>c*(valid?n:0));
+      preview.innerHTML=costHtml(costs);
+      const end=Math.max(now(),state.army.training.length?state.army.training[state.army.training.length-1]:0)+Math.max(0,valid?n:0)*SCOUT_TRAIN_MS;
+      timing.textContent=valid?`${n} × 10 minuten · laatste gereed over ${clockTime(end-now())}`:'Vul een geldig aantal van 1 tot 500 in.';
+      train.disabled=!valid||!enough(costs);train.textContent=valid?`Train ${n} verkenner${n===1?'':'s'}`:'Train verkenners';
+      return valid?n:0;
+    }
+    quantity.addEventListener('input',selection);
+    $('#scoutMax').onclick=()=>{quantity.value=maxScoutOrder();selection()};
+    train.onclick=()=>{
+      update();const n=selection(),costs=SCOUT_COST.map(c=>c*n);
+      if(!n||!enough(costs))return;
+      RES.forEach((r,i)=>state.stock[r]-=costs[i]);
+      const times=state.army.training;let nextStart=Math.max(now(),times.length?times[times.length-1]:0);
+      for(let i=0;i<n;i++){const finish=nextStart+SCOUT_TRAIN_MS;times.push(finish);state.army.trainingStarted[String(finish)]=nextStart;nextStart=finish;}
+      save();showBuilding('barracks');renderResources();
+    };
+    selection();
   }
 }
 $('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij en academie ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
