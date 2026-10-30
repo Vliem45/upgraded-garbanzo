@@ -157,3 +157,11 @@
 
 /* v0.11.2: palisade is painted into the two matching complete backgrounds. */
 .village-wall-rear-v0111,.village-wall-front-v0111{display:none!important}
+
+/* v0.12: hex-world canvas */
+.world-map-shell{position:relative;margin:0 10px;border:3px solid #9e9465;border-radius:18px;background:#162820;overflow:hidden;box-shadow:0 8px 20px #091b14a8}
+#kingdomWorld{display:block;width:100%;height:min(67dvh,620px);min-height:390px;touch-action:none;image-rendering:pixelated;cursor:grab}
+#kingdomWorld:active{cursor:grabbing}
+.map-controls{position:absolute;right:9px;top:10px;display:flex;flex-direction:column;gap:7px}
+.map-controls button{width:39px;height:39px;border-radius:10px;background:#294a37dd;color:#f5e8c7;border:1px solid #b7a979;font-size:22px;font-weight:700}
+.world-credit{text-align:center;font-size:10px;color:#95a88f;margin:5px 12px 12px}

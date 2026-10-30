@@ -216,9 +216,92 @@ function showPlot(n){
   document.querySelectorAll('[data-place-existing]').forEach(b=>b.addEventListener('click',()=>placeExistingBuilding(n,b.dataset.placeExisting)));
   document.querySelectorAll('[data-build-place]').forEach(b=>b.addEventListener('click',()=>beginPlacedBuilding(n,b.dataset.buildPlace)));
 }
+// v0.12: persistent, seeded hex-world. The world is independent of village progression.
+const WORLD_RADIUS=10;
+let mapCamera={x:0,y:0,zoom:1},mapSelection=null, mapMounted=false;
+const worldArt=new Image();worldArt.src='assets/fantasyhextiles_v3.png';
+const worldHash=(q,r,salt=0)=>{let x=(Math.imul(q+1027,374761393)^Math.imul(r+2049,668265263)^Math.imul(state.world.seed+salt,2246822519))|0;x=Math.imul(x^(x>>>13),1274126177);return ((x^(x>>>16))>>>0)/4294967296};
+function initWorld(){
+ if(!state.world||!Number.isInteger(state.world.seed)){
+   state.world={seed:Math.floor(Math.random()*2147483646)+1,discovered:[]};
+ }
+ if(!Array.isArray(state.world.discovered))state.world.discovered=[];
+ // 3x3 beginning around our hometown. Fogged tiles keep their content hidden.
+ for(let q=-1;q<=1;q++)for(let r=-1;r<=1;r++){
+  const key=`${q},${r}`;if(!state.world.discovered.includes(key))state.world.discovered.push(key);
+ }
+ save();
+}
+function worldTerrain(q,r){
+ if(q===0&&r===0)return {name:'Dorp 1',sprite:[1,1],kind:'village'};
+ const n=worldHash(q,r);
+ if(n<.09)return {name:'Water',sprite:[6,0],kind:'water'};
+ if(n<.17)return {name:'Heuvels',sprite:[3,0],kind:'hills'};
+ if(n<.23)return {name:'Bergen',sprite:[5,0],kind:'mountain'};
+ if(n<.45)return {name:'Dicht bos',sprite:[2,0],kind:'forest'};
+ if(n<.65)return {name:'Bos',sprite:[1,0],kind:'forest'};
+ if(n<.73)return {name:'Moeras',sprite:[4,1],kind:'swamp'};
+ if(n<.83)return {name:'Akkerland',sprite:[3,1],kind:'field'};
+ if(n<.94)return {name:'Grasland',sprite:[0,0],kind:'plain'};
+ return {name:'Open vlakte',sprite:[6,1],kind:'plain'};
+}
 function renderMap(){
-  const symbols=['?','?','?','?','?','?','🌲','⛰️','🌾','?','?','🌿','🏰','🌳','?','?','🪨','🌲','🌿','?','?','?','?','?','?'];
-  return `<div class="scene-head"><div><h1>De wereld</h1><p>De eerste negen vakken zijn bekend</p></div><span class="pill">3 × 3 ontdekt</span></div><section class="world">${symbols.map((s,i)=>`<div class="worldcell ${s==='?'?'fog':''}">${s}</div>`).join('')}</section><p class="note">🧭 De wereldkaart is alvast zichtbaar. Verkenners, NPC-koninkrijken en verdere ontdekking bouwen we in een volgende versie.</p>`;
+ initWorld();
+ return `<div class="scene-head"><div><h1>De wereld</h1><p>Ontdek je eigen koninkrijk</p></div><span class="pill" id="worldCounter">${state.world.discovered.length} ontdekt</span></div>
+  <div class="world-map-shell"><canvas id="kingdomWorld" aria-label="Hexagonwereldkaart"></canvas>
+  <div class="map-controls"><button type="button" data-world-zoom="in" aria-label="Inzoomen">＋</button><button type="button" data-world-zoom="out" aria-label="Uitzoomen">−</button><button type="button" data-world-zoom="home" aria-label="Centreer op eigen dorp">⌂</button></div></div>
+  <p class="note">Tik op een ontdekte zeshoek voor informatie. Versleep de kaart om rond te kijken. Verkenners en nieuwe ontdekkingen volgen in de volgende update.</p>
+  <p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
+}
+function setupWorld(){
+ const canvas=document.getElementById('kingdomWorld');if(!canvas)return;
+ const wrap=canvas.parentElement,ctx=canvas.getContext('2d');
+ const scale=2.18,stepX=32*scale*.75,stepY=28*scale;
+ const known=new Set(state.world.discovered);
+ const at=(q,r)=>({x:q*stepX,y:r*stepY+(q%2!==0?stepY/2:0)});
+ const draw=()=>{
+  const w=canvas.clientWidth,h=canvas.clientHeight,dpr=Math.min(2,window.devicePixelRatio||1);
+  if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr)}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#14261d';ctx.fillRect(0,0,w,h);
+  ctx.save();ctx.translate(w/2+mapCamera.x,h/2+mapCamera.y);ctx.scale(mapCamera.zoom,mapCamera.zoom);
+  ctx.imageSmoothingEnabled=false;
+  for(let q=-WORLD_RADIUS;q<=WORLD_RADIUS;q++)for(let r=-WORLD_RADIUS;r<=WORLD_RADIUS;r++){
+    const {x,y}=at(q,r),key=`${q},${r}`,visible=known.has(key),t=worldTerrain(q,r);
+    const dx=x+mapCamera.x/mapCamera.zoom,dy=y+mapCamera.y/mapCamera.zoom;
+    if(Math.abs(dx)>w/(mapCamera.zoom*2)+130||Math.abs(dy)>h/(mapCamera.zoom*2)+130)continue;
+    if(visible&&worldArt.complete&&worldArt.naturalWidth){
+      ctx.drawImage(worldArt,t.sprite[0]*32,t.sprite[1]*48,32,48,x-32*scale/2,y-24*scale,32*scale,48*scale);
+    }else{
+      // Hex footprint: width 32, height 28; obscure unexplored locations.
+      ctx.beginPath();let pts=[[x-16*scale,y],[x-8*scale,y-14*scale],[x+8*scale,y-14*scale],[x+16*scale,y],[x+8*scale,y+14*scale],[x-8*scale,y+14*scale]];
+      pts.forEach(([px,py],i)=>i?ctx.lineTo(px,py):ctx.moveTo(px,py));ctx.closePath();ctx.fillStyle='#26382f';ctx.fill();ctx.strokeStyle='#45584b';ctx.lineWidth=1;ctx.stroke();
+    }
+    if(visible&&q===0&&r===0){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText('Dorp 1',x,y+33)}
+    if(mapSelection&&mapSelection.q===q&&mapSelection.r===r){ctx.beginPath();ctx.ellipse(x,y,29,27,0,0,Math.PI*2);ctx.strokeStyle='#ffe7aa';ctx.lineWidth=2.5;ctx.stroke()}
+  }
+  ctx.restore();
+ };
+ const redraw=()=>{draw()};worldArt.addEventListener('load',redraw,{once:true});draw();
+ const pointers=new Map();let dragStart=null,moved=false,pinch=null;
+ const px=e=>({x:e.clientX-canvas.getBoundingClientRect().left,y:e.clientY-canvas.getBoundingClientRect().top});
+ canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,px(e));if(pointers.size===1){dragStart=px(e);moved=false}else if(pointers.size===2){let a=[...pointers.values()];pinch=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)}});
+ canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;let old=pointers.get(e.pointerId),pos=px(e);pointers.set(e.pointerId,pos);if(pointers.size===2){let a=[...pointers.values()],dist=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinch)mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*dist/pinch));pinch=dist;moved=true}else{mapCamera.x+=pos.x-old.x;mapCamera.y+=pos.y-old.y;if(Math.hypot(pos.x-dragStart.x,pos.y-dragStart.y)>7)moved=true}draw()});
+ canvas.addEventListener('pointerup',e=>{const pos=px(e);pointers.delete(e.pointerId);if(!moved&&pointers.size===0){
+    let nearest=null,dist=Infinity;for(let q=-WORLD_RADIUS;q<=WORLD_RADIUS;q++)for(let r=-WORLD_RADIUS;r<=WORLD_RADIUS;r++){
+      let a=at(q,r),sx=canvas.clientWidth/2+mapCamera.x+a.x*mapCamera.zoom,sy=canvas.clientHeight/2+mapCamera.y+a.y*mapCamera.zoom,d=Math.hypot(pos.x-sx,pos.y-sy);if(d<dist){nearest={q,r};dist=d}
+    }
+    if(nearest&&dist<stepY*mapCamera.zoom*.7){mapSelection=nearest;draw();showWorldTile(nearest.q,nearest.r)}
+  }if(pointers.size<2)pinch=null;});
+ canvas.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);pinch=null});
+ canvas.addEventListener('wheel',e=>{e.preventDefault();mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(e.deltaY>0?.9:1.1)));draw()},{passive:false});
+ wrap.querySelectorAll('[data-world-zoom]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.worldZoom==='home'){mapCamera={x:0,y:0,zoom:1}}else{mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(b.dataset.worldZoom==='in'?1.2:1/1.2)))}draw()}));
+}
+function showWorldTile(q,r){
+ if(!state.world.discovered.includes(`${q},${r}`)){modal('<h2>🌫️ Onbekend gebied</h2><p>Dit gebied ligt nog achter de ontdekkingsmist. Verkenners komen in een volgende update.</p>');return}
+ const t=worldTerrain(q,r);
+ if(t.kind==='village'){
+  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>Nog niet ingevoerd</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten, aanvallen en troepen volgen later. Gebruik het menu onderaan om je dorp te beheren.</p>`);
+ }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Verkenningsopdrachten, dieren, ruïnes en extra terreineffecten volgen later.</p>`)
 }
 function renderQueue(){
   const q=state.queue,el=$('#queue');
@@ -230,7 +313,11 @@ function renderQueue(){
 function render(){
   update();
   renderResources();
-  $('#main').innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();
+  const mainEl=$('#main');
+  if(screen!=='map'||!mainEl.querySelector('#kingdomWorld')){
+    mainEl.innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();
+    if(screen==='map')setupWorld();
+  }
   renderQueue();
   document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));
   document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));
