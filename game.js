@@ -95,14 +95,24 @@ function finishArmyTimers(time){
  initScouts();let changed=false;
  while(state.army.training.length&&state.army.training[0]<=time){const done=state.army.training.shift();delete state.army.trainingStarted[String(done)];state.army.scouts++;changed=true;}
  const scout=state.army.scout;
- if(scout.travel&&time>=scout.travel.end){
-  const wasReturning=!!scout.travel.returning;
-  scout.q=scout.travel.q;scout.r=scout.travel.r;scout.travel=null;
-  if(!wasReturning)for(let q=scout.q-1;q<=scout.q+1;q++)for(let r=scout.r-1;r<=scout.r+1;r++){
-   if(Math.abs(q)<=WORLD_RADIUS&&Math.abs(r)<=WORLD_RADIUS){const key=`${q},${r}`;if(!state.world.discovered.includes(key))state.world.discovered.push(key);}
+ if(scout.travel){
+  const tr=scout.travel;
+  if(Array.isArray(tr.route)){
+   // Advance one hex at a time, including on reopening after offline play.
+   while(tr.route.length && time>=tr.nextStepEnd){
+    const next=tr.route.shift();scout.q=next.q;scout.r=next.r;
+    if(!tr.returning)revealScoutHex(scout.q,scout.r);
+    tr.nextStepEnd+=SCOUT_STEP_MS;changed=true;
+   }
+   if(!tr.route.length&&time>=tr.end){scout.travel=null;changed=true;}
+  }else if(time>=tr.end){
+   // Migration for missions started in v0.12.4: never discard an existing journey.
+   scout.q=tr.q;scout.r=tr.r;scout.travel=null;
+   if(!tr.returning)revealScoutHex(scout.q,scout.r);
+   changed=true;
   }
-  changed=true;
  }
+
  return changed;
 }
 const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse']||0);
@@ -325,7 +335,7 @@ function renderMap(){
  return `<div class="scene-head"><div><h1>De wereld</h1><p>Ontdek je eigen koninkrijk</p></div><span class="pill" id="worldCounter">${state.world.discovered.length} ontdekt</span></div>
   <div class="world-map-shell"><canvas id="kingdomWorld" aria-label="Hexagonwereldkaart"></canvas>
   <div class="map-controls"><button type="button" data-world-zoom="in" aria-label="Inzoomen">＋</button><button type="button" data-world-zoom="out" aria-label="Uitzoomen">−</button><button type="button" data-world-zoom="home" aria-label="Centreer op eigen dorp">⌂</button></div></div>
-  <p class="note" id="scoutStatus">Tik op een aangrenzende zeshoek om je verkenner te sturen. Elke stap duurt 6 minuten en 40 seconden.</p>
+  <p class="note" id="scoutStatus">Tik op een ontdekt vakje of de rand van de mist om je verkenner automatisch een route te laten lopen.</p>
   <p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
 }
 let mapRedraw=null;
@@ -359,7 +369,12 @@ function setupWorld(){
   const scout=state.army.scout,spot=at(scout.q,scout.r);
   ctx.fillStyle='#fce3a7';ctx.strokeStyle='#183b28';ctx.lineWidth=3;ctx.beginPath();ctx.arc(spot.x,spot.y-16,8,0,Math.PI*2);ctx.fill();ctx.stroke();
   ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('🚶',spot.x,spot.y-12);
-  if(scout.travel){const goal=at(scout.travel.q,scout.travel.r);ctx.strokeStyle='#f7d78b';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(spot.x,spot.y-16);ctx.lineTo(goal.x,goal.y-16);ctx.stroke();ctx.setLineDash([]);}
+  if(scout.travel){
+   const stops=Array.isArray(scout.travel.route)?scout.travel.route:[{q:scout.travel.q,r:scout.travel.r}];
+   ctx.strokeStyle='#f7d78b';ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(spot.x,spot.y-16);
+   for(const node of stops){const v=at(node.q,node.r);ctx.lineTo(v.x,v.y-16)}
+   ctx.stroke();ctx.setLineDash([]);
+  }
   ctx.restore();
  };
  mapRedraw=draw;
@@ -390,39 +405,88 @@ function hexDistance(q,r,toQ=0,toR=0){
  }
  return Math.abs(q-toQ)+Math.abs(r-toR);
 }
+// Neighbour rules use the same odd-column offset layout as the canvas.
+function hexNeighbours(q,r){
+ return [[q,r-1],[q,r+1],[q-1,r],[q+1,r],
+         [q-1,r+(q%2!==0?1:-1)],[q+1,r+(q%2!==0?1:-1)]]
+  .filter(([x,y])=>Math.abs(x)<=WORLD_RADIUS&&Math.abs(y)<=WORLD_RADIUS);
+}
+function revealScoutHex(q,r){
+ if(!state.world||!Array.isArray(state.world.discovered))return;
+ const seen=new Set(state.world.discovered);
+ for(let x=q-1;x<=q+1;x++)for(let y=r-2;y<=r+2;y++){
+  if(Math.abs(x)<=WORLD_RADIUS&&Math.abs(y)<=WORLD_RADIUS&&hexDistance(q,r,x,y)<=1)seen.add(`${x},${y}`);
+ }
+ state.world.discovered=[...seen];
+}
+function scoutRoute(fromQ,fromR,toQ,toR,allowUnknownDestination=false){
+ const goal=`${toQ},${toR}`,known=new Set(state.world.discovered),start=`${fromQ},${fromR}`;
+ if(!known.has(goal)&&!allowUnknownDestination)return null;
+ const queue=[[fromQ,fromR]],came=new Map([[start,null]]);
+ for(let i=0;i<queue.length;i++){
+  const [q,r]=queue[i],key=`${q},${r}`;
+  if(key===goal){
+   const path=[];let cur=key;
+   while(cur!==start){const [x,y]=cur.split(',').map(Number);path.unshift({q:x,r:y});cur=came.get(cur);}
+   return path;
+  }
+  for(const [x,y] of hexNeighbours(q,r)){
+   const next=`${x},${y}`;
+   if(came.has(next)||(!known.has(next)&&next!==goal))continue;
+   came.set(next,key);queue.push([x,y]);
+  }
+ }
+ return null;
+}
+function startScoutJourney(path,returning=false,extraMs=0){
+ if(!path||!path.length)return false;
+ const sc=state.army.scout,t=now(),final=path[path.length-1];
+ sc.travel={q:final.q,r:final.r,start:t,end:t+extraMs+path.length*SCOUT_STEP_MS,
+  nextStepEnd:t+extraMs+SCOUT_STEP_MS,route:path,returning};
+ save();closeModal();render();return true;
+}
 function recallScout(){
  update();const sc=state.army.scout;
  if(!state.army.scouts||sc.travel?.returning||(sc.q===0&&sc.r===0&&!sc.travel))return;
- const t=now();let travelTime=0;
+ const path=scoutRoute(sc.q,sc.r,0,0,false);
+ if(!path)return;
+ // A scout already between hexes first needs to reverse the distance travelled.
+ let extra=0;
  if(sc.travel){
-   // Turn around from the current point of this one-hex movement.
-   const start=Number.isFinite(sc.travel.start)?sc.travel.start:sc.travel.end-SCOUT_STEP_MS;
-   travelTime=Math.max(0,Math.min(SCOUT_STEP_MS,t-start));
+  const segmentStart=Array.isArray(sc.travel.route)?sc.travel.nextStepEnd-SCOUT_STEP_MS:
+   Number.isFinite(sc.travel.start)?sc.travel.start:sc.travel.end-SCOUT_STEP_MS;
+  extra=Math.max(0,Math.min(SCOUT_STEP_MS,now()-segmentStart));
  }
- travelTime+=hexDistance(sc.q,sc.r)*SCOUT_STEP_MS;
- sc.travel={q:0,r:0,start:t,end:t+travelTime,returning:true};
- save();closeModal();render();
+ if(path.length)startScoutJourney(path,true,extra);
+ else if(extra>0){sc.travel={q:0,r:0,start:now(),end:now()+extra,nextStepEnd:now()+extra,route:[],returning:true};save();closeModal();render();}
 }
 function dispatchScout(q,r){
  update();const sc=state.army.scout;
- if(sc.travel||!state.army.scouts||!adjacent(q,r,sc.q,sc.r))return;
- sc.travel={q,r,start:now(),end:now()+SCOUT_STEP_MS};save();closeModal();render();if(mapRedraw)mapRedraw();
+ if(sc.travel||!state.army.scouts)return;
+ const known=state.world.discovered.includes(`${q},${r}`);
+ const path=scoutRoute(sc.q,sc.r,q,r,!known);
+ if(!path||!path.length)return;
+ startScoutJourney(path,false);
 }
 function showWorldTile(q,r){
- initScouts();
- if(!state.world.discovered.includes(`${q},${r}`)){
-   const sc=state.army.scout,can=state.army.scouts>0&&!sc.travel&&adjacent(q,r,sc.q,sc.r);
-   modal(`<h2>🌫️ Onbekend gebied</h2><p>Dit terrein is nog niet verkend.</p>${can?'<button class="action" id="sendScout">🧭 Stuur verkenner (6:40)</button>':'<p class="subtle">Je kunt alleen aangrenzende tegels verkennen en niet tijdens een lopende tocht.</p>'}`);
-   if(can)$('#sendScout').onclick=()=>dispatchScout(q,r);return;
- }
- const sc=state.army.scout,can=state.army.scouts>0&&!sc.travel&&adjacent(q,r,sc.q,sc.r);
- const sendButton=can?'<button class="action" id="sendScout">🧭 Stuur verkenner (6:40)</button>':'';
+ update();const sc=state.army.scout;
+ const known=state.world.discovered.includes(`${q},${r}`);
+ const path=!sc.travel&&state.army.scouts?scoutRoute(sc.q,sc.r,q,r,!known):null;
+ const can=!!path?.length;
+ const mins=can?clockTime(path.length*SCOUT_STEP_MS):'';
+ const sendButton=can?`<button class="action" id="sendScout">🧭 Stuur verkenner · ${path.length} ${path.length===1?'veld':'velden'} · ${mins}</button>`:'';
  const hook=()=>{if(can)$('#sendScout').onclick=()=>dispatchScout(q,r)};
+ if(!known){
+  modal(`<h2>🌫️ Onbekend gebied</h2><p>Dit terrein is nog niet verkend.</p><p class="subtle">${can?'Reis automatisch via bekend terrein naar de grens van de mist.':'Dit gebied ligt nog te ver voorbij de ontdekte grens, of er is al een verkenner onderweg.'}</p>${sendButton}`);
+  hook();return;
+ }
  const t=worldTerrain(q,r);
  if(t.kind==='village'){
-  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);hook();
- }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Dieren, ruïnes en extra terreineffecten volgen later.</p>${sendButton}`);hook();
+  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);
+ }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Dieren, ruïnes en extra terreineffecten volgen later.</p>${sendButton}`);
+ hook();
 }
+
 function renderQueue(){
   const q=state.queue,el=$('#queue');
   if(!q){el.innerHTML='';return}
@@ -442,7 +506,7 @@ function render(){
   refreshLiveTimers();
   if(screen==='map'){
     const status=$('#scoutStatus'),sc=state.army.scout;
-    if(status)status.textContent=sc.travel?`🧭 Verkenner ${sc.travel.returning?'op terugreis naar Dorp 1':'onderweg naar '+sc.travel.q+' | '+sc.travel.r}. Nog ${Math.max(0,Math.ceil((sc.travel.end-now())/60_000))} minuten.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een aangrenzende zeshoek om te reizen (6:40 per veld).`;
+    if(status)status.textContent=sc.travel?`🧭 Verkenner ${sc.travel.returning?'op terugreis naar Dorp 1':'onderweg naar '+sc.travel.q+' | '+sc.travel.r}. Nog ${clockTime(sc.travel.end-now())}.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een ontdekt vakje of de grens van de mist om een route te plannen.`;
     const counter=$('#worldCounter');if(counter)counter.textContent=`${state.world.discovered.length} ontdekt`;
     if(mapRedraw)mapRedraw();
   }
@@ -506,7 +570,7 @@ function troopAtHome(){let sc=state.army.scout;return Math.max(0,state.army.scou
 function scoutingHtml(){
  const a=state.army,sc=a.scout,t=a.training[0],ts=a.trainingStarted||{};
  let first=t?`<div class="pk-timer-row"><b>Volgende verkenner klaar over</b><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}" style="width:0%"></div></div>`:'<p class="subtle">Geen verkenners in training.</p>';
- let expedition=sc.travel?`<div class="pk-movement"><b>🧭 ${sc.travel.returning?'Terug naar thuisdorp':'Ontdekking · heenreis'}</b><p>Troepen: 1 verkenner<br>Van: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
+ let expedition=sc.travel?`<div class="pk-movement"><b>🧭 ${sc.travel.returning?'Terug naar thuisdorp':'Ontdekking · heenreis'}</b><p>Troepen: 1 verkenner<br>Actuele hexagon: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
  (sc.q!==0||sc.r!==0?`<div class="pk-movement"><b>🧭 Op verkenning</b><p>1 verkenner bevindt zich op <b>${sc.q} | ${sc.r}</b> en wacht op een nieuwe opdracht.</p></div>`:'<p class="subtle">Er zijn geen troepen onderweg.</p>');
  return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${a.training.length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik verkenners: <b>${a.scouts} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}${a.scouts&&(sc.travel||sc.q!==0||sc.r!==0)&&!sc.travel?.returning?'<button type="button" class="action" id="recallScout">🏠 Troepen naar huis sturen</button>':''}<h3>Training</h3><p>In training: <b>${a.training.length}</b></p>${first}</section>`;
 }
