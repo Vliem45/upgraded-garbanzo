@@ -173,3 +173,11 @@
 
 /* v0.12.3 batch barracks training */
 .pk-batch{margin-top:14px}.pk-batch-row{display:flex;gap:10px;align-items:stretch;margin:9px 0}.pk-batch-row input{min-width:0;width:50%;flex:1;background:#fff6df;border:1px solid #b9a879;border-radius:9px;padding:10px 12px;font-size:18px;color:#283523}.pk-batch-row .small-btn{flex:0 0 auto;margin:0;padding:10px 12px}.pk-batch .action{margin-top:15px}
+
+/* v0.12.4: grain balance visible in the top bar */
+.resource .pk-crop-net{display:block;font-size:clamp(10px,2.7vw,13px);font-weight:800;line-height:1.15;margin-top:3px;white-space:nowrap}
+.pk-negative{color:#c94332!important}
+.pk-positive{color:#297e43!important}
+#productionPanel.production-panel:not(.hidden){line-height:1.55}
+#productionPanel.production-panel:not(.hidden)>div{padding:2px 0}
+.pk-army #recallScout{margin-top:12px;width:100%}

@@ -51,11 +51,20 @@ function initScouts(){
  if(!Number.isInteger(state.army.scout.q))state.army.scout.q=0;
  if(!Number.isInteger(state.army.scout.r))state.army.scout.r=0;
 }
+// Population: one point requires one grain per hour. A field at level 0 has no workers.
+const BUILDING_POP={main:3,warehouse:1,granary:1,barracks:3,market:3,smithy:3,academy:5,stables:5,residence:3,workshop:5,rally:1,wall:0};
+const FIELD_POP={wood:2,clay:2,iron:3,crop:0};
+function levelBand(level){return Math.min(3,Math.floor((Math.max(1,level)-1)/5))}
+function buildingPopulation(){return Object.entries(BUILDING_POP).reduce((sum,[id,base])=>{const lv=state.buildings[id]||0;return sum+(lv>0&&id!=='wall'?base+levelBand(lv):0)},0)}
+function fieldPopulation(){return state.fields.reduce((sum,f)=>sum+(f.level>0?(FIELD_POP[f.type]||0)+levelBand(f.level):0),0)}
+function population(){return buildingPopulation()+fieldPopulation()}
 function upkeepPerHour(){return state.army?state.army.scouts:0}
+function cropNet(){return perHour('crop')-population()-upkeepPerHour()}
+
 function maxScoutOrder(){return Math.max(0,Math.min(500,...RES.map((r,i)=>Math.floor((state.stock[r]+0.000001)/SCOUT_COST[i]))))}
 function applyCropInterval(hours){
  if(hours<=0)return;
- let crop=state.stock.crop,prod=perHour('crop'),remaining=hours,guard=0;
+ let crop=state.stock.crop,prod=perHour('crop')-population(),remaining=hours,guard=0;
  while(remaining>1e-10 && guard++<10000){
   const deficit=upkeepPerHour()-prod;
   if(deficit<=0){crop=Math.min(availableCap('crop'),crop-deficit*remaining);break;}
@@ -72,7 +81,7 @@ function applyCropInterval(hours){
   if(state.army.scouts===0){state.army.scout.travel=null;state.army.scout.q=0;state.army.scout.r=0;}
  }
  state.stock.crop=Math.max(0,Math.min(availableCap('crop'),crop));
- if(state.stock.crop>0||upkeepPerHour()<=perHour('crop'))state.army.starvationProgress=0;
+ if(state.stock.crop>0||upkeepPerHour()<=perHour('crop')-population())state.army.starvationProgress=0;
 }
 function applyResourceInterval(from,to){
  let hours=Math.max(0,to-from)/3600000;if(!hours)return;
@@ -87,8 +96,9 @@ function finishArmyTimers(time){
  while(state.army.training.length&&state.army.training[0]<=time){const done=state.army.training.shift();delete state.army.trainingStarted[String(done)];state.army.scouts++;changed=true;}
  const scout=state.army.scout;
  if(scout.travel&&time>=scout.travel.end){
+  const wasReturning=!!scout.travel.returning;
   scout.q=scout.travel.q;scout.r=scout.travel.r;scout.travel=null;
-  for(let q=scout.q-1;q<=scout.q+1;q++)for(let r=scout.r-1;r<=scout.r+1;r++){
+  if(!wasReturning)for(let q=scout.q-1;q<=scout.q+1;q++)for(let r=scout.r-1;r<=scout.r+1;r++){
    if(Math.abs(q)<=WORLD_RADIUS&&Math.abs(r)<=WORLD_RADIUS){const key=`${q},${r}`;if(!state.world.discovered.includes(key))state.world.discovered.push(key);}
   }
   changed=true;
@@ -149,12 +159,13 @@ function startBuild(kind,id,cost,next){
 }
 const $=s=>document.querySelector(s);
 function renderResources(){
-  const el=$('#resources');
-  el.innerHTML=RES.map(r=>`<button class="resource ${state.stock[r]>=availableCap(r)?'full':''}" data-res="${r}"><span class="emoji">${ICON[r]}</span><span class="num">${fmt(state.stock[r])}</span><span class="cap">/ ${fmt(availableCap(r))}</span></button>`).join('');
+  const el=$('#resources'),net=cropNet();
+  el.innerHTML=RES.map(r=>`<button class="resource ${state.stock[r]>=availableCap(r)?'full':''}" data-res="${r}"><span class="emoji">${ICON[r]}</span><span class="num">${fmt(state.stock[r])}</span><span class="cap">/ ${fmt(availableCap(r))}</span>${r==='crop'?`<span class="pk-crop-net ${net<0?'pk-negative':'pk-positive'}">${net>=0?'+':''}${fmt(net)}/u</span>`:''}</button>`).join('');
   const p=$('#productionPanel');
   p.classList.toggle('hidden',!resourceOpen);
-  if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen)-(resourceOpen==='crop'?upkeepPerHour():0))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;
-  el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{resourceOpen=resourceOpen===b.dataset.res?null:b.dataset.res;renderResources()}))
+  if(resourceOpen==='crop')p.innerHTML=`<b>🌾 Graanbalans</b><div>Brutoproductie: <b>+${fmt(perHour('crop'))}/u</b></div><div>Gebouwen: <b>−${fmt(buildingPopulation())}/u</b></div><div>Landerijen: <b>−${fmt(fieldPopulation())}/u</b></div><div>Troepen: <b>−${fmt(upkeepPerHour())}/u</b></div><div>Netto: <b class="${net<0?'pk-negative':'pk-positive'}">${net>=0?'+':''}${fmt(net)}/u</b></div><div>Bevolking: <b>${fmt(population())}</b></div>${net<0&&state.stock.crop<=0?'<div class="pk-negative">⚠️ Hongersnood: troepen sterven geleidelijk.</div>':''}`;
+  else if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;
+  el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{resourceOpen=resourceOpen===b.dataset.res?null:b.dataset.res;renderResources()}));
 }
 
 const LAND_PLOTS=[
@@ -368,10 +379,34 @@ function setupWorld(){
  wrap.querySelectorAll('[data-world-zoom]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.worldZoom==='home'){mapCamera={x:0,y:0,zoom:1}}else{mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(b.dataset.worldZoom==='in'?1.2:1/1.2)))}draw()}));
 }
 function adjacent(q,r,a,b){let dq=q-a,dr=r-b;return (dq===0&&Math.abs(dr)===1)||(Math.abs(dq)===1&&(dr===0||dr===(a%2!==0?1:-1)));}
+function hexDistance(q,r,toQ=0,toR=0){
+ const key=(a,b)=>`${a},${b}`,queue=[[q,r,0]],seen=new Set([key(q,r)]);
+ for(let i=0;i<queue.length;i++){
+  const [a,b,d]=queue[i];if(a===toQ&&b===toR)return d;
+  for(const [dq,dr] of [[0,-1],[0,1],[1,0],[-1,0],[1,a%2!==0?1:-1],[-1,a%2!==0?1:-1]]){
+   const x=a+dq,y=b+dr,k=key(x,y);if(Math.abs(x)>WORLD_RADIUS||Math.abs(y)>WORLD_RADIUS||seen.has(k))continue;
+   seen.add(k);queue.push([x,y,d+1]);
+  }
+ }
+ return Math.abs(q-toQ)+Math.abs(r-toR);
+}
+function recallScout(){
+ update();const sc=state.army.scout;
+ if(!state.army.scouts||sc.travel?.returning||(sc.q===0&&sc.r===0&&!sc.travel))return;
+ const t=now();let travelTime=0;
+ if(sc.travel){
+   // Turn around from the current point of this one-hex movement.
+   const start=Number.isFinite(sc.travel.start)?sc.travel.start:sc.travel.end-SCOUT_STEP_MS;
+   travelTime=Math.max(0,Math.min(SCOUT_STEP_MS,t-start));
+ }
+ travelTime+=hexDistance(sc.q,sc.r)*SCOUT_STEP_MS;
+ sc.travel={q:0,r:0,start:t,end:t+travelTime,returning:true};
+ save();closeModal();render();
+}
 function dispatchScout(q,r){
  update();const sc=state.army.scout;
  if(sc.travel||!state.army.scouts||!adjacent(q,r,sc.q,sc.r))return;
- sc.travel={q,r,end:now()+SCOUT_STEP_MS};save();closeModal();render();if(mapRedraw)mapRedraw();
+ sc.travel={q,r,start:now(),end:now()+SCOUT_STEP_MS};save();closeModal();render();if(mapRedraw)mapRedraw();
 }
 function showWorldTile(q,r){
  initScouts();
@@ -385,7 +420,7 @@ function showWorldTile(q,r){
  const hook=()=>{if(can)$('#sendScout').onclick=()=>dispatchScout(q,r)};
  const t=worldTerrain(q,r);
  if(t.kind==='village'){
-  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>Nog niet ingevoerd</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);hook();
+  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);hook();
  }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Dieren, ruïnes en extra terreineffecten volgen later.</p>${sendButton}`);hook();
 }
 function renderQueue(){
@@ -407,7 +442,7 @@ function render(){
   refreshLiveTimers();
   if(screen==='map'){
     const status=$('#scoutStatus'),sc=state.army.scout;
-    if(status)status.textContent=sc.travel?`🧭 Verkenner onderweg naar ${sc.travel.q} | ${sc.travel.r}. Nog ${Math.max(0,Math.ceil((sc.travel.end-now())/60_000))} minuten.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een aangrenzende zeshoek om te reizen (6:40 per veld).`;
+    if(status)status.textContent=sc.travel?`🧭 Verkenner ${sc.travel.returning?'op terugreis naar Dorp 1':'onderweg naar '+sc.travel.q+' | '+sc.travel.r}. Nog ${Math.max(0,Math.ceil((sc.travel.end-now())/60_000))} minuten.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een aangrenzende zeshoek om te reizen (6:40 per veld).`;
     const counter=$('#worldCounter');if(counter)counter.textContent=`${state.world.discovered.length} ontdekt`;
     if(mapRedraw)mapRedraw();
   }
@@ -421,7 +456,7 @@ function modal(html){$('#modal').innerHTML=`<button class="close" aria-label="Sl
 function closeModal(){$('#modalBackdrop').classList.add('hidden')}
 // Project Kingdom v0.10.1: estimate affordability using current production.
 function affordability(cost){
-  const missing=RES.map((r,i)=>({r,needed:cost[i],have:state.stock[r],rate:perHour(r),cap:availableCap(r)}));
+  const missing=RES.map((r,i)=>({r,needed:cost[i],have:state.stock[r],rate:r==='crop'?cropNet():perHour(r),cap:availableCap(r)}));
   const blocked=missing.filter(x=>x.needed>x.cap);
   if(blocked.length){
     const names=blocked.map(x=>x.r==='crop'?'graanschuur':'pakhuis');
@@ -440,7 +475,7 @@ function affordability(cost){
 }
 // Project Kingdom v0.10.1: estimate affordability using current production.
 function affordability(cost){
-  const missing=RES.map((r,i)=>({r,needed:cost[i],have:state.stock[r],rate:perHour(r),cap:availableCap(r)}));
+  const missing=RES.map((r,i)=>({r,needed:cost[i],have:state.stock[r],rate:r==='crop'?cropNet():perHour(r),cap:availableCap(r)}));
   const blocked=missing.filter(x=>x.needed>x.cap);
   if(blocked.length){
     const names=blocked.map(x=>x.r==='crop'?'graanschuur':'pakhuis');
@@ -471,9 +506,9 @@ function troopAtHome(){let sc=state.army.scout;return Math.max(0,state.army.scou
 function scoutingHtml(){
  const a=state.army,sc=a.scout,t=a.training[0],ts=a.trainingStarted||{};
  let first=t?`<div class="pk-timer-row"><b>Volgende verkenner klaar over</b><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}" style="width:0%"></div></div>`:'<p class="subtle">Geen verkenners in training.</p>';
- let expedition=sc.travel?`<div class="pk-movement"><b>🧭 Ontdekking · heenreis</b><p>Troepen: 1 verkenner<br>Van: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
+ let expedition=sc.travel?`<div class="pk-movement"><b>🧭 ${sc.travel.returning?'Terug naar thuisdorp':'Ontdekking · heenreis'}</b><p>Troepen: 1 verkenner<br>Van: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
  (sc.q!==0||sc.r!==0?`<div class="pk-movement"><b>🧭 Op verkenning</b><p>1 verkenner bevindt zich op <b>${sc.q} | ${sc.r}</b> en wacht op een nieuwe opdracht.</p></div>`:'<p class="subtle">Er zijn geen troepen onderweg.</p>');
- return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${a.training.length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik verkenners: <b>${a.scouts} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}<h3>Training</h3><p>In training: <b>${a.training.length}</b></p>${first}</section>`;
+ return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${a.training.length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik verkenners: <b>${a.scouts} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}${a.scouts&&(sc.travel||sc.q!==0||sc.r!==0)&&!sc.travel?.returning?'<button type="button" class="action" id="recallScout">🏠 Troepen naar huis sturen</button>':''}<h3>Training</h3><p>In training: <b>${a.training.length}</b></p>${first}</section>`;
 }
 function refreshLiveTimers(){
  const m=document.getElementById('modal');if(!m||document.getElementById('modalBackdrop').classList.contains('hidden'))return;
@@ -504,7 +539,7 @@ function showBuilding(id){
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
-  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());}
+  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;}
   if(id==='barracks'&&(state.buildings.barracks||0)>=1){
     const sc=state.army.scout,wait=state.army.training.length;
     const card=document.createElement('div');card.className='scout-training';
