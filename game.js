@@ -38,20 +38,44 @@ for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:
   if(state.buildings[id]==null)state.buildings[id]=def;
 }
 
+// Units persist inside the original village save, alongside world state.
+const SCOUT_COST=[160,100,50,50],SCOUT_TRAIN_MS=1400000,SCOUT_STEP_MS=400000;
+function initScouts(){
+ if(!state.army||typeof state.army!=='object')state.army={scouts:1,training:[],scout:{q:0,r:0,travel:null}};
+ if(!Number.isFinite(state.army.scouts))state.army.scouts=1;
+ if(!Array.isArray(state.army.training))state.army.training=[];
+ if(!state.army.scout)state.army.scout={q:0,r:0,travel:null};
+ if(!Number.isInteger(state.army.scout.q))state.army.scout.q=0;
+ if(!Number.isInteger(state.army.scout.r))state.army.scout.r=0;
+}
+function upkeepPerHour(){return state.army?state.army.scouts:0}
+function finishArmyTimers(time){
+ initScouts();let changed=false;
+ while(state.army.training.length&&state.army.training[0]<=time){state.army.training.shift();state.army.scouts++;changed=true;}
+ const scout=state.army.scout;
+ if(scout.travel&&time>=scout.travel.end){
+  scout.q=scout.travel.q;scout.r=scout.travel.r;scout.travel=null;
+  for(let q=scout.q-1;q<=scout.q+1;q++)for(let r=scout.r-1;r<=scout.r+1;r++){
+   if(Math.abs(q)<=WORLD_RADIUS&&Math.abs(r)<=WORLD_RADIUS){const key=`${q},${r}`;if(!state.world.discovered.includes(key))state.world.discovered.push(key);}
+  }
+  changed=true;
+ }
+ return changed;
+}
 const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse']||0);
 function perHour(r){return 25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0)}
 function update(){
   let t=now();
-  let until=state.queue?Math.min(t,state.queue.end):t;
+  initWorld();initScouts();finishArmyTimers(t);let until=state.queue?Math.min(t,state.queue.end):t;
   let dt=Math.max(0,until-state.last)/3600000;
-  for(const r of RES) state.stock[r]=Math.min(availableCap(r),state.stock[r]+perHour(r)*dt);
+  for(const r of RES) state.stock[r]=Math.max(0,Math.min(availableCap(r),state.stock[r]+(perHour(r)-(r==='crop'?upkeepPerHour():0))*dt));
   if(state.queue&&t>=state.queue.end){
     const q=state.queue;
     if(q.kind==='field')state.fields[q.id].level++;
     if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;
     state.queue=null;
     let after=Math.max(0,t-until)/3600000;
-    for(const r of RES)state.stock[r]=Math.min(availableCap(r),state.stock[r]+perHour(r)*after)
+    for(const r of RES)state.stock[r]=Math.max(0,Math.min(availableCap(r),state.stock[r]+(perHour(r)-(r==='crop'?upkeepPerHour():0))*after))
   }
   state.last=t;
   save();
@@ -89,7 +113,7 @@ function renderResources(){
   el.innerHTML=RES.map(r=>`<button class="resource ${state.stock[r]>=availableCap(r)?'full':''}" data-res="${r}"><span class="emoji">${ICON[r]}</span><span class="num">${fmt(state.stock[r])}</span><span class="cap">/ ${fmt(availableCap(r))}</span></button>`).join('');
   const p=$('#productionPanel');
   p.classList.toggle('hidden',!resourceOpen);
-  if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;
+  if(resourceOpen)p.innerHTML=`${ICON[resourceOpen]} <b>${TYPES[resourceOpen].resource}</b> · +${fmt(perHour(resourceOpen)-(resourceOpen==='crop'?upkeepPerHour():0))} per uur · opslag ${fmt(state.stock[resourceOpen])} / ${fmt(availableCap(resourceOpen))}`;
   el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{resourceOpen=resourceOpen===b.dataset.res?null:b.dataset.res;renderResources()}))
 }
 
@@ -250,9 +274,10 @@ function renderMap(){
  return `<div class="scene-head"><div><h1>De wereld</h1><p>Ontdek je eigen koninkrijk</p></div><span class="pill" id="worldCounter">${state.world.discovered.length} ontdekt</span></div>
   <div class="world-map-shell"><canvas id="kingdomWorld" aria-label="Hexagonwereldkaart"></canvas>
   <div class="map-controls"><button type="button" data-world-zoom="in" aria-label="Inzoomen">＋</button><button type="button" data-world-zoom="out" aria-label="Uitzoomen">−</button><button type="button" data-world-zoom="home" aria-label="Centreer op eigen dorp">⌂</button></div></div>
-  <p class="note">Tik op een ontdekte zeshoek voor informatie. Versleep de kaart om rond te kijken. Verkenners en nieuwe ontdekkingen volgen in de volgende update.</p>
+  <p class="note" id="scoutStatus">Tik op een aangrenzende zeshoek om je verkenner te sturen. Elke stap duurt 6 minuten en 40 seconden.</p>
   <p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
 }
+let mapRedraw=null;
 function setupWorld(){
  const canvas=document.getElementById('kingdomWorld');if(!canvas)return;
  const wrap=canvas.parentElement,ctx=canvas.getContext('2d');
@@ -260,6 +285,7 @@ function setupWorld(){
  const known=new Set(state.world.discovered);
  const at=(q,r)=>({x:q*stepX,y:r*stepY+(q%2!==0?stepY/2:0)});
  const draw=()=>{
+  known.clear();for(const key of state.world.discovered)known.add(key);
   const w=canvas.clientWidth,h=canvas.clientHeight,dpr=Math.min(2,window.devicePixelRatio||1);
   if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr)}
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#14261d';ctx.fillRect(0,0,w,h);
@@ -279,8 +305,13 @@ function setupWorld(){
     if(visible&&q===0&&r===0){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText('Dorp 1',x,y+33)}
     if(mapSelection&&mapSelection.q===q&&mapSelection.r===r){ctx.beginPath();ctx.ellipse(x,y,29,27,0,0,Math.PI*2);ctx.strokeStyle='#ffe7aa';ctx.lineWidth=2.5;ctx.stroke()}
   }
+  const scout=state.army.scout,spot=at(scout.q,scout.r);
+  ctx.fillStyle='#fce3a7';ctx.strokeStyle='#183b28';ctx.lineWidth=3;ctx.beginPath();ctx.arc(spot.x,spot.y-16,8,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('🧭',spot.x,spot.y-12);
+  if(scout.travel){const goal=at(scout.travel.q,scout.travel.r);ctx.strokeStyle='#f7d78b';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(spot.x,spot.y-16);ctx.lineTo(goal.x,goal.y-16);ctx.stroke();ctx.setLineDash([]);}
   ctx.restore();
  };
+ mapRedraw=draw;
  const redraw=()=>{draw()};worldArt.addEventListener('load',redraw,{once:true});draw();
  const pointers=new Map();let dragStart=null,moved=false,pinch=null;
  const px=e=>({x:e.clientX-canvas.getBoundingClientRect().left,y:e.clientY-canvas.getBoundingClientRect().top});
@@ -296,12 +327,26 @@ function setupWorld(){
  canvas.addEventListener('wheel',e=>{e.preventDefault();mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(e.deltaY>0?.9:1.1)));draw()},{passive:false});
  wrap.querySelectorAll('[data-world-zoom]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.worldZoom==='home'){mapCamera={x:0,y:0,zoom:1}}else{mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(b.dataset.worldZoom==='in'?1.2:1/1.2)))}draw()}));
 }
+function adjacent(q,r,a,b){let dq=q-a,dr=r-b;return (dq===0&&Math.abs(dr)===1)||(Math.abs(dq)===1&&(dr===0||dr===(a%2!==0?1:-1)));}
+function dispatchScout(q,r){
+ update();const sc=state.army.scout;
+ if(sc.travel||!state.army.scouts||!adjacent(q,r,sc.q,sc.r))return;
+ sc.travel={q,r,end:now()+SCOUT_STEP_MS};save();closeModal();render();if(mapRedraw)mapRedraw();
+}
 function showWorldTile(q,r){
- if(!state.world.discovered.includes(`${q},${r}`)){modal('<h2>🌫️ Onbekend gebied</h2><p>Dit gebied ligt nog achter de ontdekkingsmist. Verkenners komen in een volgende update.</p>');return}
+ initScouts();
+ if(!state.world.discovered.includes(`${q},${r}`)){
+   const sc=state.army.scout,can=state.army.scouts>0&&!sc.travel&&adjacent(q,r,sc.q,sc.r);
+   modal(`<h2>🌫️ Onbekend gebied</h2><p>Dit terrein is nog niet verkend.</p>${can?'<button class="action" id="sendScout">🧭 Stuur verkenner (6:40)</button>':'<p class="subtle">Je kunt alleen aangrenzende tegels verkennen en niet tijdens een lopende tocht.</p>'}`);
+   if(can)$('#sendScout').onclick=()=>dispatchScout(q,r);return;
+ }
+ const sc=state.army.scout,can=state.army.scouts>0&&!sc.travel&&adjacent(q,r,sc.q,sc.r);
+ const sendButton=can?'<button class="action" id="sendScout">🧭 Stuur verkenner (6:40)</button>':'';
+ const hook=()=>{if(can)$('#sendScout').onclick=()=>dispatchScout(q,r)};
  const t=worldTerrain(q,r);
  if(t.kind==='village'){
-  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>Nog niet ingevoerd</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten, aanvallen en troepen volgen later. Gebruik het menu onderaan om je dorp te beheren.</p>`);
- }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Verkenningsopdrachten, dieren, ruïnes en extra terreineffecten volgen later.</p>`)
+  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>Nog niet ingevoerd</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);hook();
+ }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Dieren, ruïnes en extra terreineffecten volgen later.</p>${sendButton}`);hook();
 }
 function renderQueue(){
   const q=state.queue,el=$('#queue');
@@ -319,6 +364,12 @@ function render(){
     if(screen==='map')setupWorld();
   }
   renderQueue();
+  if(screen==='map'){
+    const status=$('#scoutStatus'),sc=state.army.scout;
+    if(status)status.textContent=sc.travel?`🧭 Verkenner onderweg naar ${sc.travel.q} | ${sc.travel.r}. Nog ${Math.max(0,Math.ceil((sc.travel.end-now())/60_000))} minuten.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een aangrenzende zeshoek om te reizen (6:40 per veld).`;
+    const counter=$('#worldCounter');if(counter)counter.textContent=`${state.world.discovered.length} ontdekt`;
+    if(mapRedraw)mapRedraw();
+  }
   document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));
   document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));
   document.querySelectorAll('[data-open-village]').forEach(b=>b.addEventListener('click',()=>{screen='village';render()}));
@@ -383,7 +434,7 @@ function showBuilding(id){
     id==='granary'?`Graanopslag: ${fmt(storageCap(level))} → ${fmt(storageCap(next))}`:
     id==='main'?'Het hoofdgebouw vormt het hart van het dorp. Bouwtijdkortingen voegen we later toe.':
     id==='wall'?'De stadsmuur omringt het dorp. Verdediging voegen we later toe, maar je kunt hem nu al bouwen en verbeteren.':
-    id==='barracks'?'De kazerne is de toekomstige plek om soldaten te trainen. Troepentraining voegen we later toe.':
+    id==='barracks'?'Train hier verkenners om de wereld te ontdekken.':
     id==='market'?'De marktplaats wordt later de plek voor handel en transport. Voor nu kun je hem bouwen en verbeteren.':
     id==='smithy'?'De smederij wordt later de plek om wapens en uitrusting te verbeteren. Voor nu kun je hem bouwen en verbeteren.':
     id==='academy'?'De academie wordt later de plek om nieuwe troepensoorten te onderzoeken. Je kunt haar nu bouwen en verbeteren.':
@@ -393,6 +444,13 @@ function showBuilding(id){
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(duration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
+  if(id==='barracks'&&(state.buildings.barracks||0)>=1){
+    const sc=state.army.scout,wait=state.army.training.length;
+    const card=document.createElement('div');card.className='scout-training';
+    card.innerHTML=`<hr><h3>🧭 Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Training:</b> 23:20 per verkenner</p>${costHtml(SCOUT_COST)}<button type="button" class="action" id="trainScout" ${!enough(SCOUT_COST)?'disabled':''}>Train één verkenner</button>`;
+    $('#modal').appendChild(card);
+    $('#trainScout').onclick=()=>{update();if(!enough(SCOUT_COST))return;RES.forEach((r,i)=>state.stock[r]-=SCOUT_COST[i]);const times=state.army.training;times.push(Math.max(now(),times.length?times[times.length-1]:0)+SCOUT_TRAIN_MS);save();showBuilding('barracks');renderResources()};
+  }
 }
 $('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij en academie ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
 document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});

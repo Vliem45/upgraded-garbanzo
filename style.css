@@ -165,3 +165,5 @@
 .map-controls{position:absolute;right:9px;top:10px;display:flex;flex-direction:column;gap:7px}
 .map-controls button{width:39px;height:39px;border-radius:10px;background:#294a37dd;color:#f5e8c7;border:1px solid #b7a979;font-size:22px;font-weight:700}
 .world-credit{text-align:center;font-size:10px;color:#95a88f;margin:5px 12px 12px}
+
+.scout-training{margin-top:20px;padding-top:10px;border-top:1px solid #bba77a}.scout-training h3{margin:8px 0}.scout-training .action{margin:12px 0 4px}
