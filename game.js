@@ -26,6 +26,7 @@ const initial=()=>({
   fields:['wood','crop','iron','crop','clay','crop','wood','iron','crop','clay'].map((type,i)=>({type,id:i,level:0})),
   buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0,stables:0,residence:0,workshop:0},
   queue:null,
+  villageName:'Dorp 1',
   last:now()
 });
 function load(){
@@ -36,6 +37,10 @@ function load(){
   return initial();
 }
 let state=load(),screen='fields',resourceOpen=null;
+if(typeof state.villageName!=='string'||!state.villageName.trim())state.villageName='Dorp 1';
+const villageName=()=>state.villageName||'Dorp 1';
+const safeText=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const villagePill=()=>`<button type="button" class="pill village-name-pill" data-rename-village title="Dorpsnaam wijzigen">${safeText(villageName())} ✎</button>`;
 if(!state.plots||typeof state.plots!=='object')state.plots={};
 if(!state.buildings)state.buildings={main:1,warehouse:0,granary:0};
 for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0,stables:0,residence:0,workshop:0})){
@@ -234,7 +239,7 @@ function renderFields(){
     const f=state.fields[pos.id],busy=state.queue?.kind==='field'&&state.queue.id===f.id;
     return `<button type="button" class="land-hotspot ${busy?'land-busy':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} ${f.id+1}, niveau ${f.level}"><span class="land-level">${busy?'🔨 ':''}${f.level}</span></button>`;
   }).join('');
-  return `<div class="scene-head"><div><h1>De landerijen</h1><p>Tik op een grondstofgebied om te verbeteren</p></div><span class="pill">10 velden</span></div><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Doorlopend landschap met twee houthakkers, twee mijnen, twee kleigroeven, vier graanvelden en een dorp met brug" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section><p class="land-instruction">Tik op een veld om te upgraden of op het dorp om naar de dorpskern te gaan.</p><div class="info-strip"><span>🏡 Basisproductie +25/u</span><span>🔨 Eén bouwproject tegelijk</span></div>`;
+  return `<div class="scene-head"><div><h1>De landerijen</h1></div>${villagePill()}</div><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Doorlopend landschap met twee houthakkers, twee mijnen, twee kleigroeven, vier graanvelden en een dorp met brug" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section>`;
 }
 
 const VILLAGE_PLOTS=[
@@ -262,7 +267,7 @@ function renderVillage(){
     const art=plotArt(type);
     return `<button class="village-plot plot-${p.n} ${[1,2,9].includes(p.n)?'village-rear':'village-front'} ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="level-badge">${state.buildings[type]||'🔨'}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
   }).join('');
-  return `<div class="scene-head"><div><h1>De dorpskern</h1></div><span class="pill">🏡 Dorp 1</span></div>
+  return `<div class="scene-head"><div><h1>De dorpskern</h1></div>${villagePill()}</div>
   <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
     <img class="village-art" src="${wallBuilt?'assets/village-wall-integrated-v0112.png':'assets/village-no-wall-v0112.png'}" alt="Dorpskern met hoofdgebouw, negen bouwplaatsen, een rivier en brug" draggable="false">
     ${rallyBuilt?`<img class="village-rally-v011" src="assets/rally-v060.png" alt="" draggable="false">`:''}
@@ -357,7 +362,7 @@ function initWorld(){
  save();
 }
 function worldTerrain(q,r){
- if(q===0&&r===0)return {name:'Dorp 1',sprite:[1,1],kind:'village'};
+ if(q===0&&r===0)return {name:villageName(),sprite:[1,1],kind:'village'};
  const n=worldHash(q,r);
  if(n<.09)return {name:'Water',sprite:[6,0],kind:'water'};
  if(n<.17)return {name:'Heuvels',sprite:[3,0],kind:'hills'};
@@ -402,7 +407,7 @@ function setupWorld(){
       ctx.beginPath();let pts=[[x-16*scale,y],[x-8*scale,y-14*scale],[x+8*scale,y-14*scale],[x+16*scale,y],[x+8*scale,y+14*scale],[x-8*scale,y+14*scale]];
       pts.forEach(([px,py],i)=>i?ctx.lineTo(px,py):ctx.moveTo(px,py));ctx.closePath();ctx.fillStyle='#26382f';ctx.fill();ctx.strokeStyle='#45584b';ctx.lineWidth=1;ctx.stroke();
     }
-    if(visible&&q===0&&r===0){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText('Dorp 1',x,y+33)}
+    if(visible&&q===0&&r===0){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText(villageName(),x,y+33)}
     if(mapSelection&&mapSelection.q===q&&mapSelection.r===r){ctx.beginPath();ctx.ellipse(x,y,29,27,0,0,Math.PI*2);ctx.strokeStyle='#ffe7aa';ctx.lineWidth=2.5;ctx.stroke()}
   }
   const scout=state.army.scout,spot=at(scout.q,scout.r);
@@ -521,7 +526,7 @@ function showWorldTile(q,r){
  }
  const t=worldTerrain(q,r);
  if(t.kind==='village'){
-  modal(`<h2>🏰 Dorp 1</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);
+  modal(`<h2>🏰 ${safeText(villageName())}</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);
  }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Dieren, ruïnes en extra terreineffecten volgen later.</p>${sendButton}`);
  hook();
 }
@@ -545,17 +550,23 @@ function render(){
   refreshLiveTimers();
   if(screen==='map'){
     const status=$('#scoutStatus'),sc=state.army.scout;
-    if(status)status.textContent=sc.travel?`🧭 Verkenner ${sc.travel.returning?'op terugreis naar Dorp 1':'onderweg naar '+sc.travel.q+' | '+sc.travel.r}. Nog ${clockTime(sc.travel.end-now())}.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een ontdekt vakje of de grens van de mist om een route te plannen.`;
+    if(status)status.textContent=sc.travel?`🧭 Verkenner ${sc.travel.returning?'op terugreis naar '+villageName():'onderweg naar '+sc.travel.q+' | '+sc.travel.r}. Nog ${clockTime(sc.travel.end-now())}.`:`🧭 ${state.army.scouts} verkenner(s) beschikbaar. Tik op een ontdekt vakje of de grens van de mist om een route te plannen.`;
     const counter=$('#worldCounter');if(counter)counter.textContent=`${state.world.discovered.length} ontdekt`;
     if(mapRedraw)mapRedraw();
   }
   document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));
+  document.querySelectorAll('[data-rename-village]').forEach(b=>b.addEventListener('click',showRenameVillage));
   document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));
   document.querySelectorAll('[data-open-village]').forEach(b=>b.addEventListener('click',()=>{screen='village';render()}));
   document.querySelectorAll('[data-building]').forEach(b=>b.addEventListener('click',()=>showBuilding(b.dataset.building)));
   document.querySelectorAll('[data-plot]').forEach(b=>b.addEventListener('click',()=>showPlot(+b.dataset.plot)));
 }
 function modal(html){$('#modal').innerHTML=`<button class="close" aria-label="Sluiten" id="closeModal">✕</button>`+html;$('#modalBackdrop').classList.remove('hidden');$('#closeModal').onclick=closeModal}
+function showRenameVillage(){
+ modal(`<h2>🏡 Dorp hernoemen</h2><p>Kies een naam voor je dorp (maximaal 24 tekens).</p><form id="villageRenameForm"><input class="village-name-input" id="villageNameInput" maxlength="24" required value="${safeText(villageName())}" aria-label="Dorpsnaam"><p class="subtle" id="villageNameError"></p><button type="submit" class="action">Naam opslaan</button></form>`);
+ const input=$('#villageNameInput');input.focus();input.select();
+ $('#villageRenameForm').onsubmit=e=>{e.preventDefault();const name=input.value.trim();if(!name||name.length>24){$('#villageNameError').textContent='Vul een naam in van maximaal 24 tekens.';return;}state.villageName=name;save();closeModal();render();};
+}
 function closeModal(){$('#modalBackdrop').classList.add('hidden')}
 // Project Kingdom v0.10.1: estimate affordability using current production.
 function affordability(cost){
@@ -599,19 +610,33 @@ function costHtml(cost){return `<div class="cost-grid">${cost.map((c,i)=>`<div c
 function showField(id){
   update();
   let f=state.fields[id],t=TYPES[f.type],next=f.level+1,cost=price(f.type,f.level),busy=!!state.queue;
-  modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(buildDuration(next)/1000)} seconden · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);
+  modal(`<h2>${t.icon} ${t.name}</h2><p>Veld ${id+1} · niveau ${f.level}</p><div class="stats"><div class="stat">Huidige productie<b>+${fmt(YIELD[f.level]||405*Math.pow(1.5,f.level-10))}/u</b></div><div class="stat">Na verbetering<b>+${fmt(YIELD[next]||405*Math.pow(1.5,next-10))}/u</b></div></div><p><b>Upgrade naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${clockTime(buildDuration(next))} · kosten groeien per niveau ×1,3.</p><button class="action" id="doBuild" ${busy||!enough(cost)?'disabled':''}>${busy?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':'Verbeter veld'}</button>`);
   $('#doBuild').onclick=()=>startBuild('field',id,cost,next);
 }
 
 // v0.12.2: render read-only timer values without recreating open modals every second.
 function clockTime(ms){let sec=Math.max(0,Math.ceil(ms/1000));return `${Math.floor(sec/3600)>0?String(Math.floor(sec/3600))+':':''}${String(Math.floor(sec%3600/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
 function troopAtHome(){let sc=state.army.scout;return Math.max(0,state.army.scouts-((sc.travel||sc.q!==0||sc.r!==0)?1:0))}
+function trainingQueueHtml(filter=null){
+ const entries=armyTrainingEntries();const pending=filter?entries.filter(x=>x.type===filter):entries;
+ if(!pending.length)return '<p class="subtle">Geen eenheden in training.</p>';
+ const next=pending[0],idx=entries.findIndex(x=>x.end===next.end&&x.type===next.type);
+ const prev=idx>0?entries[idx-1].end:now();
+ const stored=next.type==='scout'?state.army.trainingStarted[String(next.end)]:null;
+ const base=next.type==='scout'?trainDuration(SCOUT_TRAIN_MS):trainDuration(INFANTRY[next.type]?.ms||600000);
+ const start=Number.isFinite(stored)?stored:Math.min(prev,next.end-base);
+ return `<div class="pk-training-queue"><div class="pk-timer-row"><span>Volgende ${next.type==='scout'?'verkenner':INFANTRY[next.type]?.name.toLowerCase()||'eenheid'} gereed over</span><strong data-timer-end="${next.end}">${clockTime(next.end-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${next.end}" data-training-start="${start}"></div></div><p class="subtle">${pending.length} in training · Laatste gereed over <span data-timer-end="${pending[pending.length-1].end}">${clockTime(pending[pending.length-1].end-now())}</span></p></div>`;
+}
+function unitStatsHtml(type){const d=INFANTRY[type];const scout=type==='scout';return `<div class="pk-unit-details"><p><b>Aanval:</b> ${scout?0:d.attack}<br><b>Verdediging tegen infanterie:</b> ${scout?10:d.inf}<br><b>Verdediging tegen cavalerie:</b> ${scout?5:d.cav}<br><b>Snelheid:</b> ${scout?9:d.speed} velden/u<br><b>Draagkracht:</b> ${scout?25:d.carry}<br><b>Graanverbruik:</b> ${scout?1:d.upkeep} per uur</p><b>Trainingskosten</b>${costHtml(scout?SCOUT_COST:d.cost)}</div>`}
+function bindTroopDetails(){document.querySelectorAll('#modal [data-troop-detail]').forEach(b=>b.onclick=()=>{const detail=b.nextElementSibling;if(detail)detail.hidden=!detail.hidden;});}
 function scoutingHtml(){
  const a=state.army,sc=a.scout,t=a.training[0],ts=a.trainingStarted||{};
  let first=t?`<div class="pk-timer-row"><b>Volgende verkenner klaar over</b><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}" style="width:0%"></div></div>`:'<p class="subtle">Geen verkenners in training.</p>';
  let expedition=sc.travel?`<div class="pk-movement"><b>🧭 ${sc.travel.returning?'Terug naar thuisdorp':'Ontdekking · heenreis'}</b><p>Troepen: 1 verkenner<br>Actuele hexagon: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
  (sc.q!==0||sc.r!==0?`<div class="pk-movement"><b>🧭 Op verkenning</b><p>1 verkenner bevindt zich op <b>${sc.q} | ${sc.r}</b> en wacht op een nieuwe opdracht.</p></div>`:'<p class="subtle">Er zijn geen troepen onderweg.</p>');
- return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${armyTrainingEntries().length}</b><small>In training</small></div></div><p>🧭 Verkenners in het dorp: <b>${troopAtHome()}</b><br>🌾 Graanverbruik troepen: <b>${upkeepPerHour()} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}${a.scouts&&(sc.travel||sc.q!==0||sc.r!==0)&&!sc.travel?.returning?'<button type="button" class="action" id="recallScout">🏠 Troepen naar huis sturen</button>':''}<h3>Garnizoen</h3>${Object.entries(INFANTRY).map(([id,d])=>`<p><img src="${d.icon}" width="20" height="20" style="vertical-align:middle" alt=""> ${d.name}: <b>${a.units[id]||0}</b></p>`).join('')}<h3>Training</h3><p>In training: <b>${armyTrainingEntries().length}</b></p>${first}${a.unitTraining.length?`<p>Volgende infanterie gereed over <b data-timer-end="${a.unitTraining[0].end}">${clockTime(a.unitTraining[0].end-now())}</b></p>`:''}</section>`;
+ const stationed=[...(troopAtHome()>0?[['scout','Verkenner',UNIT_ICON_SCOUT,troopAtHome()]]:[]),...Object.entries(INFANTRY).filter(([id])=>(a.units[id]||0)>0).map(([id,d])=>[id,d.name,d.icon,a.units[id]])];
+ const garrison=stationed.length?stationed.map(([id,name,icon,count])=>`<div class="pk-troop-item"><button type="button" data-troop-detail="${id}" class="pk-troop-toggle"><img src="${icon}" width="24" height="24" alt=""> <span>${name}: <b>${count}</b></span> <span>⌄</span></button><div hidden>${unitStatsHtml(id)}</div></div>`).join(''):'<p class="subtle">Er zijn geen troepen in het dorp.</p>';
+ return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()+Object.values(a.units).reduce((n,v)=>n+v,0)}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${armyTrainingEntries().length}</b><small>In training</small></div></div><p>🌾 Graanverbruik troepen: <b>${upkeepPerHour()} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}${a.scouts&&(sc.travel||sc.q!==0||sc.r!==0)&&!sc.travel?.returning?'<button type="button" class="action" id="recallScout">🏠 Troepen naar huis sturen</button>':''}<h3>Garnizoen</h3>${garrison}<h3>Training</h3>${trainingQueueHtml()}</section>`;
 }
 function refreshLiveTimers(){
  const m=document.getElementById('modal');if(!m||document.getElementById('modalBackdrop').classList.contains('hidden'))return;
@@ -619,6 +644,7 @@ function refreshLiveTimers(){
  m.querySelectorAll('[data-training-progress]').forEach(el=>{const end=Number(el.dataset.trainingProgress),start=Number(el.dataset.trainingStart);el.style.width=`${Math.max(0,Math.min(100,100*(now()-start)/Math.max(1,end-start)))}%`});
  // On completion refresh the modal once to update unit counts without losing an active interaction.
  if(m.querySelector('[data-timer-end]')&&state.research&&state.research.queue===null&&m.querySelector('.pk-new-infantry')&&m.querySelector('h3')?.textContent?.includes('Troepenonderzoek'))showBuilding('academy');
+ const nextShown=m.querySelector('.pk-training-queue [data-timer-end]');if(nextShown&&Number(nextShown.dataset.timerEnd)<=now()){const barracks=m.querySelector('.scout-training');if(barracks)showBuilding('barracks');else if(m.querySelector('.pk-army'))showBuilding('rally');}
  const preview=m.querySelector('[data-army-training-count]');if(preview&&Number(preview.dataset.armyTrainingCount)!==state.army.training.length){const id=preview.dataset.armyBuilding;if(id)showBuilding(id)}
 }
 
@@ -641,18 +667,19 @@ function showBuilding(id){
     id==='residence'?'De residentie wordt later belangrijk bij het stichten en beheren van nieuwe dorpen.':
     id==='workshop'?'Hier bouwen we later belegeringswerktuigen zoals stormrammen en katapulten.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
-  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${Math.ceil(buildDuration(next)/1000)} seconden</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
+  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${clockTime(buildDuration(next))}</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
-  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;}
+  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;bindTroopDetails();}
   if(id==='academy'&&level>=1){
     const panel=document.createElement('section');panel.className='pk-new-infantry';
     panel.innerHTML='<hr><h3>📚 Troepenonderzoek</h3><p class="subtle">Onderzoek is eenmalig per dorp. Kosten: 130% van de trainingskosten; maximaal één onderzoek tegelijk.</p>';
     $('#modal').appendChild(panel);
     if(state.research.queue){const q=state.research.queue;const def=INFANTRY[q.type];
-      panel.insertAdjacentHTML('beforeend',`<div class="pk-unit-card"><b>🔬 Onderzoek bezig: ${def?def.name:q.type}</b><p>Gereed over <strong data-timer-end="${q.end}">${clockTime(q.end-now())}</strong></p><div class="meter"><div style="width:${Math.max(0,Math.min(100,100*(now()-q.start)/(q.end-q.start)))}%"></div></div></div>`);
+      panel.insertAdjacentHTML('beforeend',`<div class="pk-unit-card"><b>🔬 Onderzoek bezig: ${def?def.name:q.type}</b><p>Gereed over <strong data-timer-end="${q.end}">${clockTime(q.end-now())}</strong></p><div class="meter"><div data-training-progress="${q.end}" data-training-start="${q.start}" style="width:${Math.max(0,Math.min(100,100*(now()-q.start)/(q.end-q.start)))}%"></div></div></div>`);
     }
     Object.entries(INFANTRY).forEach(([type,def])=>{
       const done=!!state.research.done[type],active=state.research.queue?.type===type,requirements=researchRequirements(def),costs=researchCost(def);
+      if(done||active)return;
       const req=`Kazerne ${def.barracks} · Academie ${def.academy}${def.smithy?' · Smederij '+def.smithy:''}`;
       const box=document.createElement('div');box.className='pk-unit-card';
       box.innerHTML=`<div class="pk-unit-title"><img src="${def.icon}" width="28" height="28" alt=""><b>${def.name}</b></div><p class="subtle">Vereisten: ${req}</p><p>${done?'✅ Onderzocht':active?'⏳ Onderzoek bezig':requirements?'🔓 Onderzoek beschikbaar':'🔒 Gebouwen nog niet op niveau'}</p><p>Onderzoekstijd: <b>${clockTime(researchDuration(def.researchMs))}</b> (basis ${clockTime(def.researchMs)})</p><p><b>Eenmalige onderzoekskosten:</b></p>${costHtml(costs)}<button type="button" class="action" ${done||active||!requirements||!!state.research.queue||!enough(costs)?'disabled':''}>${done?'Onderzocht':active?'Bezig':state.research.queue?'Ander onderzoek bezig':!requirements?'Vereisten ontbreken':!enough(costs)?'Niet genoeg grondstoffen':'Start onderzoek'}</button>`;
@@ -668,7 +695,7 @@ function showBuilding(id){
     const sc=state.army.scout,wait=state.army.training.length;
     const card=document.createElement('div');card.className='scout-training';
     const t=state.army.training[0],ts=state.army.trainingStarted||{};
-    card.innerHTML=`<div data-army-training-count="${wait}" data-army-building="barracks"><hr><h3>🧭 Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Training:</b> ${clockTime(trainDuration(SCOUT_TRAIN_MS))} per verkenner (basis 10:00)</p>${t?`<div class="pk-timer-row"><span>Volgende gereed over</span><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-600000}"></div></div>`:''}<div class="pk-batch"><label for="scoutAmount">Aantal verkenners</label><div class="pk-batch-row"><input type="number" inputmode="numeric" min="1" max="500" step="1" id="scoutAmount" value="1"><button type="button" class="small-btn" id="scoutMax">Maximum (${maxScoutOrder()})</button></div><p class="subtle" id="scoutTotalTime"></p><p><b>Totale kosten</b></p><div id="scoutCostPreview"></div><button type="button" class="action" id="trainScout">Train verkenners</button></div></div>`;
+    card.innerHTML=`<div data-army-training-count="${wait}" data-army-building="barracks"><hr><h3><img class="pk-inline-unit" src="${UNIT_ICON_SCOUT}" alt=""> Verkenner</h3><p>Beschikbaar: <b>${state.army.scouts}</b> · In training: <b>${wait}</b></p><p>⚔️ Aanval 0 · 🛡️ Verdediging 10 / 5 · 🚶 9 velden/u · 📦 25 · 🌾 1 graan/u</p><p><b>Training:</b> ${clockTime(trainDuration(SCOUT_TRAIN_MS))} per verkenner (basis 10:00)</p>${wait?trainingQueueHtml('scout'):''}<div class="pk-batch"><label for="scoutAmount">Aantal verkenners</label><div class="pk-batch-row"><input type="number" inputmode="numeric" min="1" max="500" step="1" id="scoutAmount" value="1"><button type="button" class="small-btn" id="scoutMax">Maximum (${maxScoutOrder()})</button></div><p class="subtle" id="scoutTotalTime"></p><p><b>Totale kosten</b></p><div id="scoutCostPreview"></div><button type="button" class="action" id="trainScout">Train verkenners</button></div></div>`;
     $('#modal').appendChild(card);
     const quantity=$('#scoutAmount'),train=$('#trainScout'),preview=$('#scoutCostPreview'),timing=$('#scoutTotalTime');
     function selection(){
@@ -695,11 +722,13 @@ function showBuilding(id){
     const list=document.createElement('section');list.className='pk-new-infantry';
     list.innerHTML='<hr><h3>⚔️ Overige infanterie</h3><p class="subtle">Eenheden vereisen onderzoek in de academie (behalve de verkenner).</p>';
     $('#modal').appendChild(list);
+    list.insertAdjacentHTML('beforeend',trainingQueueHtml());
     Object.entries(INFANTRY).forEach(([type,def])=>{
       const unlocked=unitUnlocked(def),queued=state.army.unitTraining.filter(x=>x.type===type).length;
+      if(!unlocked)return;
       const node=document.createElement('div');node.className='pk-unit-card';
       const requirements=[`Kazerne niveau ${def.barracks}`,def.academy?`Academie niveau ${def.academy}`:'',def.smithy?`Smederij niveau ${def.smithy}`:''].filter(Boolean).join(' · ');
-      node.innerHTML=`<div class="pk-unit-title"><img src="${def.icon}" width="28" height="28" alt=""><b>${def.name}</b></div><p>In dorp: <b>${unitAvailable(type)}</b> · In training: <b>${queued}</b></p><p class="subtle">Aanval ${def.attack} · Verdediging ${def.inf}/${def.cav} · ${def.speed} velden/u · Draagkracht ${def.carry} · 🌾 ${def.upkeep}/u</p><p class="subtle">${requirements}${unlocked?' · Onderzocht':' · 🔒 Eerst onderzoeken in academie'}</p><p>Training per eenheid: <b>${clockTime(trainDuration(def.ms))}</b> (basis ${clockTime(def.ms)})</p><div class="pk-unit-order"><label>Aantal <input type="number" min="1" max="500" inputmode="numeric" value="1" ${unlocked?'':'disabled'}></label><button type="button" class="small-btn" ${unlocked?'':'disabled'}>Maximum (${maxUnitOrder(def)})</button></div><div class="pk-unit-cost"></div><p class="pk-unit-time subtle"></p><button type="button" class="action pk-unit-train" ${unlocked?'':'disabled'}>Train ${def.name.toLowerCase()}</button>`;
+      node.innerHTML=`<div class="pk-unit-title"><img src="${def.icon}" width="28" height="28" alt=""><b>${def.name}</b></div><p>In dorp: <b>${unitAvailable(type)}</b> · In training: <b>${queued}</b></p>${queued?trainingQueueHtml(type):''}<p class="subtle">Aanval ${def.attack} · Verdediging ${def.inf}/${def.cav} · ${def.speed} velden/u · Draagkracht ${def.carry} · 🌾 ${def.upkeep}/u</p><p class="subtle">${requirements}${unlocked?' · Onderzocht':' · 🔒 Eerst onderzoeken in academie'}</p><p>Training per eenheid: <b>${clockTime(trainDuration(def.ms))}</b> (basis ${clockTime(def.ms)})</p><div class="pk-unit-order"><label>Aantal <input type="number" min="1" max="500" inputmode="numeric" value="1" ${unlocked?'':'disabled'}></label><button type="button" class="small-btn" ${unlocked?'':'disabled'}>Maximum (${maxUnitOrder(def)})</button></div><div class="pk-unit-cost"></div><p class="pk-unit-time subtle"></p><button type="button" class="action pk-unit-train" ${unlocked?'':'disabled'}>Train ${def.name.toLowerCase()}</button>`;
       list.appendChild(node);
       const input=node.querySelector('input'),max=node.querySelector('.small-btn'),button=node.querySelector('.pk-unit-train');
       const costNode=node.querySelector('.pk-unit-cost'),timeNode=node.querySelector('.pk-unit-time');
