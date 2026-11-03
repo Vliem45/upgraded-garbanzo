@@ -95,7 +95,7 @@ function levelBand(level){return Math.min(3,Math.floor((Math.max(1,level)-1)/5))
 function buildingPopulation(){return Object.entries(BUILDING_POP).reduce((sum,[id,base])=>{const lv=state.buildings[id]||0;return sum+(lv>0&&id!=='wall'?base+levelBand(lv):0)},0)}
 function fieldPopulation(){return state.fields.reduce((sum,f)=>sum+(f.level>0?(FIELD_POP[f.type]||0)+levelBand(f.level):0),0)}
 function population(){return buildingPopulation()+fieldPopulation()}
-function upkeepPerHour(){return state.army?state.army.scouts+Object.entries(INFANTRY).reduce((a,[id,d])=>a+(state.army.units[id]||0)*d.upkeep,0):0}
+function upkeepPerHour(){if(!state.army)return 0;const atHome=Object.entries(INFANTRY).reduce((a,[id,d])=>a+(state.army.units[id]||0)*d.upkeep,0);const stationed=Object.values(state.world?.oases||{}).reduce((s,o)=>s+Object.entries(o.garrison||{}).reduce((a,[id,n])=>a+n*(INFANTRY[id]?.upkeep||0),0),0);const moving=(state.world?.missions||[]).reduce((s,m)=>s+Object.entries(m.units||{}).reduce((a,[id,n])=>a+n*(INFANTRY[id]?.upkeep||0),0),0);return state.army.scouts+atHome+stationed+moving}
 function cropNet(){return perHour('crop')-population()-upkeepPerHour()}
 
 function maxScoutOrder(){return Math.max(0,Math.min(500,...RES.map((r,i)=>Math.floor((state.stock[r]+0.000001)/SCOUT_COST[i]))))}
@@ -111,15 +111,20 @@ function applyCropInterval(hours){
   const timeUntilDeath=Math.max(0,(1-progress)/deficit);
   if(remaining+1e-10<timeUntilDeath){state.army.starvationProgress=progress+remaining*deficit;remaining=0;break;}
   remaining-=timeUntilDeath;state.army.starvationProgress=0;
-  // Highest per-unit upkeep dies first; troop deaths never reduce civilian population.
-  const candidates=Object.entries(INFANTRY).filter(([id])=>(state.army.units[id]||0)>0).sort((x,y)=>y[1].upkeep-x[1].upkeep);
-  const victim=candidates[0]?.[1].upkeep>1?candidates[0][0]:(state.army.scouts>0?'scout':candidates[0]?.[0]);
-  if(victim==='scout')state.army.scouts=Math.max(0,state.army.scouts-1);
-  else if(victim)state.army.units[victim]=Math.max(0,(state.army.units[victim]||0)-1);
-  state.army.losses.push({time:Date.now(),kind:victim||'scout',reason:'starvation',count:1});
+  // Every soldier consumes grain, including those travelling or stationed at an oasis.
+  // Famine removes a real unit rather than charging an invisible army.
+  const candidates=[];
+  for(const [id,d] of Object.entries(INFANTRY)){
+   if((state.army.units[id]||0)>0)candidates.push({id,rate:d.upkeep,remove:()=>state.army.units[id]--});
+   for(const o of Object.values(state.world?.oases||{}))if((o.garrison?.[id]||0)>0)candidates.push({id,rate:d.upkeep,remove:()=>{o.garrison[id]--;if(Object.values(o.garrison).reduce((a,b)=>a+b,0)<2&&o.unprotectedSince==null)o.unprotectedSince=Date.now();}});
+   for(const m of state.world?.missions||[])if((m.units?.[id]||0)>0)candidates.push({id,rate:d.upkeep,remove:()=>m.units[id]--});
+  }
+  if(state.army.scouts>0)candidates.push({id:'scout',rate:1,remove:()=>{state.army.scouts--;if(state.army.scout.missionCount>state.army.scouts)state.army.scout.missionCount=state.army.scouts;if(state.army.scouts===0){state.army.scout.travel=null;state.army.scout.missionTarget=null;state.army.scout.q=0;state.army.scout.r=0;}}});
+  candidates.sort((a,b)=>b.rate-a.rate);
+  if(!candidates.length){remaining=0;break;}
+  const victim=candidates[0];victim.remove();
+  state.army.losses.push({time:Date.now(),kind:victim.id,reason:'starvation',count:1});
   if(state.army.losses.length>30)state.army.losses=state.army.losses.slice(-30);
-  // A lone scout on the map is lost only if no stationed scout remains.
-  if(state.army.scouts===0){state.army.scout.travel=null;state.army.scout.q=0;state.army.scout.r=0;}
  }
  state.stock.crop=Math.max(0,Math.min(availableCap('crop'),crop));
  if(state.stock.crop>0||upkeepPerHour()<=perHour('crop')-population())state.army.starvationProgress=0;
@@ -147,7 +152,32 @@ function finishArmyTimers(time){
     if(!tr.returning)revealScoutHex(scout.q,scout.r);
     tr.nextStepEnd+=SCOUT_STEP_MS;changed=true;
    }
-   if(!tr.route.length&&time>=tr.end){scout.travel=null;changed=true;}
+   if(!tr.route.length&&time>=tr.end){
+    if(scout.missionTarget&&!tr.returning){
+      const target=scout.missionTarget,o=oasisByCoord(target.q,target.r);
+      const risk=o?Math.min(.85,.16+Object.entries(o.animals).reduce((v,[id,n])=>v+n*(ANIMALS[id]?.atk||0),0)/24000):.08;
+      const count=scout.missionCount||1;
+      const lost=Math.min(count,Math.floor(risk*count)+(worldHash(target.q,target.r,Math.floor(tr.start/3600000)+901)<risk?1:0));
+      scout.missionLost=lost;
+      if(lost>=count){
+       state.army.scouts=Math.max(0,state.army.scouts-lost);
+       logReport({kind:'loss',title:'Verkenners vermist',q:target.q,r:target.r,detail:`Alle ${lost} verkenners zijn omgekomen. Geen informatie ontvangen.`});
+       scout.missionTarget=null;scout.missionCount=0;scout.missionLost=0;scout.travel=null;scout.q=0;scout.r=0;
+       changed=true;
+      }else{
+      const returnPath=scoutRoute(scout.q,scout.r,0,0,false)||[];
+      if(returnPath.length){const fin=returnPath[returnPath.length-1];scout.travel={q:fin.q,r:fin.r,start:tr.end,end:tr.end+returnPath.length*SCOUT_STEP_MS,nextStepEnd:tr.end+SCOUT_STEP_MS,route:returnPath,returning:true};}
+      else scout.travel={q:0,r:0,start:tr.end,end:tr.end,nextStepEnd:tr.end,route:[],returning:true};
+      }
+    }else if(scout.missionTarget&&tr.returning){
+      const target=scout.missionTarget,o=oasisByCoord(target.q,target.r),loss=scout.missionLost||0,survive=Math.max(0,(scout.missionCount||1)-loss);
+      state.army.scouts=Math.max(0,state.army.scouts-loss);
+      if(survive){state.world.scouted[oasisKey(target.q,target.r)]=true;logReport({kind:'scout',title:o?'Verkenning van oase':'Verkenningsrapport',q:target.q,r:target.r,detail:o?`Oase +${o.bonus*100}% ${TYPES[o.resource].resource.toLowerCase()}. Aanwezige dieren zijn hieronder weergegeven. ${loss} verkenner(s) verloren.`:`Terrein verkend. ${loss} verkenner(s) verloren.`,animals:o?Object.fromEntries(Object.entries(o.animals).map(([id,n])=>[id,Math.ceil(n)])):null});}
+      else logReport({kind:'loss',title:'Verkenners vermist',q:target.q,r:target.r,detail:`Alle ${loss} verkenners zijn omgekomen. Geen informatie ontvangen.`});
+      scout.missionTarget=null;scout.missionCount=0;scout.missionLost=0;scout.travel=null;scout.q=0;scout.r=0;
+    }else scout.travel=null;
+    changed=true;
+   }
   }else if(time>=tr.end){
    // Migration for missions started in v0.12.4: never discard an existing journey.
    scout.q=tr.q;scout.r=tr.r;scout.travel=null;
@@ -159,9 +189,9 @@ function finishArmyTimers(time){
  return changed;
 }
 const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse']||0);
-function perHour(r){return 25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0)}
+function perHour(r){const base=25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0);return base*(1+oasisBonus(r))}
 function update(){
- const t=now();initWorld();initScouts();initResearch();
+ const t=now();initWorld();initScouts();initResearch();initOases();
  let cursor=Math.min(t,state.last||t),safety=0;
  // Event-based offline progression: finish construction and training in chronological order.
  while(cursor<t&&safety++<10000){
@@ -169,7 +199,10 @@ function update(){
   if(state.queue&&state.queue.end>cursor)boundary=Math.min(boundary,state.queue.end);
   boundary=Math.min(boundary,nextArmyTrainingBoundary(cursor));
   if(state.research.queue&&state.research.queue.end>cursor)boundary=Math.min(boundary,state.research.queue.end);
-  applyResourceInterval(cursor,boundary);cursor=boundary;
+  if(state.world?.missions?.length){for(const m of state.world.missions)if(m.arrive>cursor)boundary=Math.min(boundary,m.arrive);}
+  if(state.world?.oases)for(const o of Object.values(state.world.oases))if(o.owner==='player'&&(o.unprotectedSince!==null&&o.unprotectedSince!==undefined)&&Object.values(o.garrison||{}).reduce((a,b)=>a+b,0)<2){const deadline=o.unprotectedSince+(1+2*worldHash(o.q,o.r,777))*3600000;if(deadline>cursor)boundary=Math.min(boundary,deadline);}
+  applyResourceInterval(cursor,boundary);advanceOases(cursor,boundary);cursor=boundary;
+  resolveMissions(cursor);
   if(state.queue&&state.queue.end<=cursor){
    const q=state.queue;
    if(q.kind==='field')state.fields[q.id].level++;
@@ -180,7 +213,7 @@ function update(){
  }
  // Legacy saves may have timers ending before their saved last-update timestamp.
  if(state.queue&&state.queue.end<=t){const q=state.queue;if(q.kind==='field')state.fields[q.id].level++;if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;state.queue=null;}
- resolveArmyTraining(t);resolveResearch(t);finishArmyTimers(t);
+ resolveArmyTraining(t);resolveResearch(t);finishArmyTimers(t);if(state.army.scout.missionTarget&&state.army.scout.travel?.returning&&state.army.scout.travel.end<=t)finishArmyTimers(t);resolveMissions(t);
  state.last=t;save();
 }
 
@@ -374,13 +407,177 @@ function worldTerrain(q,r){
  if(n<.94)return {name:'Grasland',sprite:[0,0],kind:'plain'};
  return {name:'Open vlakte',sprite:[6,1],kind:'plain'};
 }
+
+// v0.12.7 Wilde Oases: persistent world population, missions and military reports.
+const ANIMALS={
+ snake:{name:'Slang',icon:'🐍',atk:45,inf:8,cav:5},wolf:{name:'Wolf',icon:'🐺',atk:22,inf:12,cav:8},hyena:{name:'Hyena',icon:'🐾',atk:32,inf:18,cav:12},eagle:{name:'Adelaar',icon:'🦅',atk:25,inf:12,cav:18},
+ boar:{name:'Wild zwijn',icon:'🐗',atk:35,inf:25,cav:15},lion:{name:'Leeuw',icon:'🦁',atk:90,inf:55,cav:35},tiger:{name:'Tijger',icon:'🐅',atk:105,inf:50,cav:40},
+ moose:{name:'Eland',icon:'🫎',atk:65,inf:70,cav:45},bear:{name:'Beer',icon:'🐻',atk:85,inf:75,cav:55},croc:{name:'Krokodil',icon:'🐊',atk:100,inf:80,cav:50},bison:{name:'Wisent',icon:'🐂',atk:75,inf:95,cav:65},
+ rhino:{name:'Neushoorn',icon:'🦏',atk:125,inf:125,cav:110},elephant:{name:'Olifant',icon:'🐘',atk:150,inf:160,cav:145}
+};
+const OASIS_HERDS={forest:{wolf:80,boar:40,bear:20},field:{hyena:120,lion:40,boar:20},plain:{hyena:120,lion:40,boar:20},swamp:{snake:120,croc:80,boar:40},mountain:{eagle:100,bear:40,bison:30},hills:{wolf:80,moose:45,bear:35}};
+const oasisKey=(q,r)=>`${q},${r}`;
+const oasisByCoord=(q,r)=>state.world.oases?.[oasisKey(q,r)]||null;
+function makeOasis(q,r){
+ const t=worldTerrain(q,r),key=oasisKey(q,r),rare=worldHash(q,r,400)<.15;
+ const primary={forest:'wood',mountain:'iron',hills:'iron',swamp:'clay',field:'crop',plain:'crop'};
+ const resource=t.kind!=='field'&&t.kind!=='plain'&&worldHash(q,r,401)<.10?'crop':primary[t.kind];
+ let base=OASIS_HERDS[t.kind]||OASIS_HERDS.forest;
+ // Savanna colossi are rare; give some rare plains herds heavier defenders.
+ if(rare&&(t.kind==='plain'||t.kind==='field')&&worldHash(q,r,402)<.55)base={hyena:60,lion:80,rhino:60,elephant:40};
+ if(rare&&t.kind==='forest'){base=worldHash(q,r,403)<.5?{wolf:80,moose:60,bear:40,bison:20}:{wolf:60,boar:50,bear:25,tiger:20};}
+ const original={};for(const [id,n] of Object.entries(base)){original[id]=Math.max(1,Math.round(n*(.8+.4*worldHash(q,r,430+Object.keys(ANIMALS).indexOf(id)))))}
+ return {q,r,resource,bonus:rare?.5:.25,owner:null,cleared:false,animals:{...original},original,unprotectedSince:null,lastWildUpdate:Date.now()};
+}
+function initOases(){
+ if(!state.world)return;
+ if(!state.world.oases||typeof state.world.oases!=='object'){
+  const candidates=[];
+  for(let q=-WORLD_RADIUS;q<=WORLD_RADIUS;q++)for(let r=-WORLD_RADIUS;r<=WORLD_RADIUS;r++){
+   if(hexDistance(q,r)<=3)continue;
+   const terrain=worldTerrain(q,r);
+   if(terrain.kind==='water'||terrain.kind==='village')continue;
+   candidates.push({q,r,score:worldHash(q,r,500)});
+  }
+  candidates.sort((a,b)=>a.score-b.score);
+  const target=Math.round(candidates.length*.05),picked=[];
+  for(const c of candidates){
+   if(picked.length>=target)break;
+   if(picked.some(p=>hexDistance(p.q,p.r,c.q,c.r)<3))continue;
+   picked.push(c);
+  }
+  state.world.oases={};for(const x of picked)state.world.oases[oasisKey(x.q,x.r)]=makeOasis(x.q,x.r);
+ }
+ if(!Array.isArray(state.world.reports))state.world.reports=[];
+ if(!Array.isArray(state.world.missions))state.world.missions=[];
+ if(!state.world.scouted||typeof state.world.scouted!=='object')state.world.scouted={};
+}
+function logReport(report){state.world.reports.unshift({id:`${Date.now()}-${Math.random().toString(36).slice(2,6)}`,time:Date.now(),...report});state.world.reports=state.world.reports.slice(0,60)}
+const oasisBonus=r=>Object.values(state.world?.oases||{}).reduce((sum,o)=>sum+(o.owner==='player'&&o.resource===r?o.bonus:0),0);
+function advanceOases(from,to){
+ const hours=Math.max(0,(to-from)/3600000);
+ for(const o of Object.values(state.world.oases||{})){
+  if(o.owner==='player'){
+   const count=Object.values(o.garrison||{}).reduce((a,b)=>a+b,0);
+   if(count>=2){o.unprotectedSince=null;continue;}
+   if(o.unprotectedSince===null||o.unprotectedSince===undefined)o.unprotectedSince=from;
+   const age=Math.max(0,(to-o.unprotectedSince)/3600000);
+   // Testable deterministic hazard, continuous over time (not one roll per page load).
+   const threshold=1+2*worldHash(o.q,o.r,777);
+   if(age>=threshold){if(count){const units=Object.fromEntries(Object.entries(o.garrison||{}).filter(([,n])=>n>0));const speed=Math.min(...Object.keys(units).map(id=>INFANTRY[id]?.speed||5));const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/speed*3600000);state.world.missions.push({kind:'return',q:o.q,r:o.r,units,arrive:to+travelMs,travelMs});}o.owner=null;o.cleared=false;o.garrison={};o.unprotectedSince=null;o.animals={...o.original};logReport({kind:'loss',q:o.q,r:o.r,title:'Oase verloren',detail:'Wilde dieren hebben je onbewaakte oase overgenomen. De productiebonus is vervallen.'});}
+  }else if(!o.cleared&&hours>0){
+   for(const id of Object.keys(o.original))o.animals[id]=Math.min(o.original[id],(o.animals[id]||0)+o.original[id]*.25*hours);
+  }
+ }
+}
+function splitLosses(counts,lossRatio,atLeastOne=false){
+ const entries=Object.entries(counts).filter(([,n])=>n>0);
+ const total=entries.reduce((v,[,n])=>v+n,0);
+ const dead=Math.min(total-(atLeastOne?1:0),Math.max(0,Math.round(total*lossRatio)));
+ const alloc=entries.map(([id,n])=>({id,n,dead:Math.floor(n*dead/total),frac:n*dead/total%1}));
+ let left=dead-alloc.reduce((a,x)=>a+x.dead,0);
+ alloc.sort((a,b)=>b.frac-a.frac);for(const e of alloc)if(left>0&&e.dead<e.n){e.dead++;left--}
+ const survivors={};for(const e of alloc)survivors[e.id]=e.n-e.dead;
+ return survivors;
+}
+function fightOasis(o,attackers){
+ const atk=Object.entries(attackers).reduce((s,[id,n])=>s+(INFANTRY[id]?.attack||0)*n,0);
+ const def=Object.entries(o.animals).reduce((s,[id,n])=>s+(ANIMALS[id]?.inf||0)*Math.ceil(n),0)*1.05;
+ const winner=atk>def;
+ const ratio=Math.pow(Math.min(atk,def)/Math.max(1,atk,def),1.5);
+ const survivingAttackers=winner?splitLosses(attackers,ratio):{};
+ const survivingAnimals=winner?{}:splitLosses(Object.fromEntries(Object.entries(o.animals).map(([id,n])=>[id,Math.ceil(n)])),Math.min(.95,ratio),true);
+ const priorAnimals=Object.fromEntries(Object.entries(o.animals).map(([id,n])=>[id,Math.ceil(n)]));
+ o.animals=winner?Object.fromEntries(Object.keys(o.original).map(id=>[id,0])):survivingAnimals;
+ o.cleared=winner;
+ logReport({kind:'battle',title:winner?'Overwinning bij oase':'Aanval op oase mislukt',q:o.q,r:o.r,winner,attackers,attackLeft:survivingAttackers,defenders:priorAnimals,defenseLeft:survivingAnimals,attackPower:Math.round(atk),defensePower:Math.round(def)});
+ return survivingAttackers;
+}
+function resolveMissions(t){
+ const active=[];
+ for(const m of state.world.missions){
+  if(m.arrive>t){active.push(m);continue;}
+  const o=oasisByCoord(m.q,m.r);
+  if(m.kind==='return'){
+   for(const [id,n] of Object.entries(m.units))state.army.units[id]=(state.army.units[id]||0)+n;
+  }else if(m.kind==='reinforce'){
+   if(o?.owner==='player'){
+    o.garrison ||= {};for(const [id,n] of Object.entries(m.units))o.garrison[id]=(o.garrison[id]||0)+n;
+    if(Object.values(o.garrison).reduce((a,b)=>a+b,0)>=2)o.unprotectedSince=null;
+   }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,arrive:m.arrive+m.travelMs});
+  }else if(m.kind==='attack'){
+   if(o){
+    const survivors=o.cleared||o.owner==='player'?m.units:fightOasis(o,m.units);
+    if(Object.values(survivors).some(n=>n>0))active.push({kind:'return',q:m.q,r:m.r,units:survivors,arrive:m.arrive+m.travelMs});
+   }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,arrive:m.arrive+m.travelMs});
+  }
+ }
+ state.world.missions=active;
+}
+function oasisStatus(o){
+ if(o.owner!=='player')return o.cleared?'Vrijgemaakt':'Wild gebied';
+ return Object.values(o.garrison||{}).reduce((a,b)=>a+b,0)>=2?'Beschermd':'Onbewaakt';
+}
+function sendOasisMission(o,kind){
+ update();if(!o||kind==='attack'&&(o.owner||o.cleared)||kind==='reinforce'&&o.owner!=='player')return;
+ const units={};
+ for(const id of Object.keys(INFANTRY)){
+  const input=document.getElementById(`pk-send-${id}`),n=Number(input?.value||0);
+  if(!Number.isSafeInteger(n)||n<0||n>(state.army.units[id]||0))return;
+  if(n)units[id]=n;
+ }
+ if(!Object.keys(units).length){alert('Selecteer eerst ten minste één soldaat.');return;}
+ const slowest=Math.min(...Object.keys(units).map(id=>INFANTRY[id].speed));
+ const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/slowest*3600000);
+ for(const [id,n] of Object.entries(units))state.army.units[id]-=n;
+ state.world.missions.push({kind,q:o.q,r:o.r,units,arrive:now()+travelMs,travelMs});
+ save();closeModal();render();
+}
+function sendOasisReinforcementHome(o){
+ update();if(o?.owner!=='player')return;
+ const g=o.garrison||{};const units={};
+ for(const id of Object.keys(INFANTRY)){
+  const n=Number(document.getElementById(`pk-recall-${id}`)?.value||0);
+  if(!Number.isSafeInteger(n)||n<0||n>(g[id]||0))return;
+  if(n)units[id]=n;
+ }
+ if(!Object.keys(units).length)return;
+ for(const [id,n] of Object.entries(units))g[id]-=n;
+ if(Object.values(g).reduce((a,b)=>a+b,0)<2)o.unprotectedSince=now();
+ const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/Math.min(...Object.keys(units).map(id=>INFANTRY[id].speed))*3600000);
+ state.world.missions.push({kind:'return',q:o.q,r:o.r,units,arrive:now()+travelMs,travelMs});
+ save();closeModal();render();
+}
+function claimOasis(o){
+ update();if(!o||o.owner||!o.cleared||!state.world.discovered.includes(oasisKey(o.q,o.r)))return;
+ const claimed=Object.values(state.world.oases).filter(x=>x.owner==='player').length;
+ const level=state.buildings.residence||0,slots=level>=15?3:level>=10?2:level>=5?1:0;
+ if(claimed>=slots)return;
+ o.owner='player';o.unprotectedSince=now();o.garrison={};save();showWorldTile(o.q,o.r);renderResources();
+}
+function unitInputRows(ids,prefix,counts){return `<div class="pk-mission-rows">${ids.filter(id=>(counts[id]||0)>0).map(id=>`<label><img src="${INFANTRY[id].icon}" alt=""><span>${INFANTRY[id].name} (${counts[id]})</span><input id="${prefix}-${id}" type="number" min="0" max="${counts[id]}" value="0" inputmode="numeric"></label>`).join('')}</div>`}
+function showReports(){
+ update();modal(`<h2>📜 Rapporten</h2>${state.world.reports.length?state.world.reports.map((r,i)=>`<button class="pk-report-item" data-report="${i}"><strong>${safeText(r.title)}</strong><small>${new Date(r.time).toLocaleString('nl-NL')} · ${r.q} | ${r.r}</small></button>`).join(''):'<p>Er zijn nog geen rapporten.</p>'}`);
+ document.querySelectorAll('[data-report]').forEach(b=>b.onclick=()=>showReport(Number(b.dataset.report)));
+}
+function reportTable(title,counts,left,animals=false){
+ const ids=Object.keys(counts||{}).filter(id=>counts[id]>0);const defs=animals?ANIMALS:INFANTRY;
+ return `<h3>${title}</h3><div class="pk-report-scroll"><table class="pk-report-table"><thead><tr><th></th>${ids.map(id=>`<th title="${safeText(defs[id]?.name||id)}"><span>${animals?defs[id]?.icon:`<img src="${defs[id]?.icon}" alt="">`}</span><small>${safeText(defs[id]?.name||id)}</small></th>`).join('')}</tr></thead><tbody><tr><th>Aantal</th>${ids.map(id=>`<td>${counts[id]}</td>`).join('')}</tr><tr><th>Verlies</th>${ids.map(id=>`<td>${counts[id]-(left[id]||0)}</td>`).join('')}</tr><tr><th>Over</th>${ids.map(id=>`<td>${left[id]||0}</td>`).join('')}</tr></tbody></table></div>`;
+}
+function showReport(index){
+ const r=state.world.reports[index];if(!r)return;
+ const content=r.kind==='battle'?`${reportTable('⚔️ Aanvaller',r.attackers,r.attackLeft)}${reportTable('🛡️ Wilde dieren',r.defenders,r.defenseLeft,true)}<p><b>Gevechtssterkte:</b> ⚔️ ${fmt(r.attackPower)} · 🛡️ ${fmt(r.defensePower)}</p><p>${r.winner?'De dieren zijn verslagen. De oase is vrijgemaakt.':'De aanval is afgeslagen.'}</p>`:
+ r.kind==='scout'?`<p>${safeText(r.detail||'')}</p>${r.animals?reportTable('Waargenomen dieren',r.animals,r.animals,true):''}`:`<p>${safeText(r.detail||'')}</p>`;
+ modal(`<button class="small-btn" id="pk-back-reports">← Rapporten</button><h2>${safeText(r.title)}</h2><p class="subtle">${new Date(r.time).toLocaleString('nl-NL')} · ${r.q} | ${r.r}</p>${content}`);
+ document.getElementById('pk-back-reports').onclick=showReports;
+}
 function renderMap(){
  initWorld();
  return `<div class="scene-head"><div><h1>De wereld</h1><p>Ontdek je eigen koninkrijk</p></div><span class="pill" id="worldCounter">${state.world.discovered.length} ontdekt</span></div>
   <div class="world-map-shell"><canvas id="kingdomWorld" aria-label="Hexagonwereldkaart"></canvas>
   <div class="map-controls"><button type="button" data-world-zoom="in" aria-label="Inzoomen">＋</button><button type="button" data-world-zoom="out" aria-label="Uitzoomen">−</button><button type="button" data-world-zoom="home" aria-label="Centreer op eigen dorp">⌂</button></div></div>
   <p class="note" id="scoutStatus">Tik op een ontdekt vakje of de rand van de mist om je verkenner automatisch een route te laten lopen.</p>
-  <p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
+  <button type="button" class="pk-map-reports" id="pk-map-reports">📜 Rapporten</button><p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
 }
 let mapRedraw=null;
 function setupWorld(){
@@ -407,12 +604,17 @@ function setupWorld(){
       ctx.beginPath();let pts=[[x-16*scale,y],[x-8*scale,y-14*scale],[x+8*scale,y-14*scale],[x+16*scale,y],[x+8*scale,y+14*scale],[x-8*scale,y+14*scale]];
       pts.forEach(([px,py],i)=>i?ctx.lineTo(px,py):ctx.moveTo(px,py));ctx.closePath();ctx.fillStyle='#26382f';ctx.fill();ctx.strokeStyle='#45584b';ctx.lineWidth=1;ctx.stroke();
     }
+    const oasis=visible?oasisByCoord(q,r):null;
+    if(oasis&&(state.world.scouted[oasisKey(q,r)]||oasis.owner==='player')){
+      ctx.textAlign='center';ctx.font='20px system-ui';ctx.fillText(oasis.resource==='wood'?'🌲':oasis.resource==='crop'?'🌾':oasis.resource==='clay'?'🧱':'⛏️',x,y+5);
+      ctx.font='bold 12px system-ui';ctx.fillStyle='#fbe6ae';ctx.fillText(oasis.bonus===.5?'★':'◆',x+16,y-16);
+    }
     if(visible&&q===0&&r===0){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText(villageName(),x,y+33)}
     if(mapSelection&&mapSelection.q===q&&mapSelection.r===r){ctx.beginPath();ctx.ellipse(x,y,29,27,0,0,Math.PI*2);ctx.strokeStyle='#ffe7aa';ctx.lineWidth=2.5;ctx.stroke()}
   }
   const scout=state.army.scout,spot=at(scout.q,scout.r);
   ctx.fillStyle='#fce3a7';ctx.strokeStyle='#183b28';ctx.lineWidth=3;ctx.beginPath();ctx.arc(spot.x,spot.y-16,8,0,Math.PI*2);ctx.fill();ctx.stroke();
-  ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('🚶',spot.x,spot.y-12);
+  if(state.army.scouts>0){ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('🚶',spot.x,spot.y-12);}
   if(scout.travel){
    const stops=Array.isArray(scout.travel.route)?scout.travel.route:[{q:scout.travel.q,r:scout.travel.r}];
    ctx.strokeStyle='#f7d78b';ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(spot.x,spot.y-16);
@@ -491,7 +693,7 @@ function startScoutJourney(path,returning=false,extraMs=0){
 }
 function recallScout(){
  update();const sc=state.army.scout;
- if(!state.army.scouts||sc.travel?.returning||(sc.q===0&&sc.r===0&&!sc.travel))return;
+ if(!state.army.scouts||sc.missionTarget||sc.travel?.returning||(sc.q===0&&sc.r===0&&!sc.travel))return;
  const path=scoutRoute(sc.q,sc.r,0,0,false);
  if(!path)return;
  // A scout already between hexes first needs to reverse the distance travelled.
@@ -507,28 +709,37 @@ function recallScout(){
 function dispatchScout(q,r){
  update();const sc=state.army.scout;
  if(sc.travel||!state.army.scouts)return;
+ const n=Number(document.getElementById('pk-scout-count')?.value||1);
+ if(!Number.isInteger(n)||n<1||n>state.army.scouts)return;
+ sc.missionCount=n;sc.missionTarget={q,r};
  const known=state.world.discovered.includes(`${q},${r}`);
  const path=scoutRoute(sc.q,sc.r,q,r,!known);
  if(!path||!path.length)return;
  startScoutJourney(path,false);
 }
 function showWorldTile(q,r){
- update();const sc=state.army.scout;
- const known=state.world.discovered.includes(`${q},${r}`);
- const path=!sc.travel&&state.army.scouts?scoutRoute(sc.q,sc.r,q,r,!known):null;
+ update();const sc=state.army.scout,known=state.world.discovered.includes(oasisKey(q,r));
+ const busy=!!sc.travel,origin=sc.q===0&&sc.r===0;
+ const path=!busy&&state.army.scouts>0?scoutRoute(sc.q,sc.r,q,r,!known):null;
  const can=!!path?.length;
- const mins=can?clockTime(path.length*SCOUT_STEP_MS):'';
- const sendButton=can?`<button class="action" id="sendScout">🧭 Stuur verkenner · ${path.length} ${path.length===1?'veld':'velden'} · ${mins}</button>`:'';
- const hook=()=>{if(can)$('#sendScout').onclick=()=>dispatchScout(q,r)};
- if(!known){
-  modal(`<h2>🌫️ Onbekend gebied</h2><p>Dit terrein is nog niet verkend.</p><p class="subtle">${can?'Reis automatisch via bekend terrein naar de grens van de mist.':'Dit gebied ligt nog te ver voorbij de ontdekte grens, of er is al een verkenner onderweg.'}</p>${sendButton}`);
-  hook();return;
+ const expedition=can?`<div class="pk-mission-box"><label>Verkenners (beschikbaar: ${state.army.scouts}) <input type="number" id="pk-scout-count" value="1" min="1" max="${state.army.scouts}"></label><button class="action" id="sendScout">🧭 Verken · ${path.length} velden · ${clockTime(path.length*SCOUT_STEP_MS)}</button></div>`:'';
+ if(!known){modal(`<h2>🌫️ Onbekend gebied</h2><p>Dit terrein is nog niet verkend.</p><p class="subtle">${can?'Verkenners keren automatisch terug. Je ontvangt pas na terugkomst een rapport.':'Ontdek eerst de aangrenzende hexagons, of wacht tot je verkenners terug zijn.'}</p>${expedition}`);if(can)$('#sendScout').onclick=()=>dispatchScout(q,r);return;}
+ const t=worldTerrain(q,r),o=oasisByCoord(q,r),scouted=state.world.scouted[oasisKey(q,r)];
+ if(t.kind==='village'){modal(`<h2>🏰 ${safeText(villageName())}</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div></div>${expedition}`);if(can)$('#sendScout').onclick=()=>dispatchScout(q,r);return;}
+ if(!o){modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><p>Coördinaten: ${q} | ${r}</p>${expedition}`);if(can)$('#sendScout').onclick=()=>dispatchScout(q,r);return;}
+ if(!scouted&&o.owner!=='player'){
+  modal(`<h2>🌫️ Terrein nog niet onderzocht</h2><p>Verken dit gebied om te zien of er iets waardevols aanwezig is.</p>${expedition}`);if(can)$('#sendScout').onclick=()=>dispatchScout(q,r);return;
  }
- const t=worldTerrain(q,r);
- if(t.kind==='village'){
-  modal(`<h2>🏰 ${safeText(villageName())}</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Eigenaar<b>Jouw koninkrijk</b></div><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div><div class="stat">Diplomatie<b>Eigen dorp</b></div></div><p class="subtle">Berichten en aanvallen volgen later. Gebruik het menu om je dorp te beheren.</p>${sendButton}`);
- }else modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><div class="stats"><div class="stat">Coördinaten<b>${q} | ${r}</b></div><div class="stat">Status<b>Ontdekt</b></div></div><p class="subtle">Dieren, ruïnes en extra terreineffecten volgen later.</p>${sendButton}`);
- hook();
+ const animals=Object.entries(o.animals).filter(([,n])=>n>0).map(([id,n])=>`${ANIMALS[id].icon} ${ANIMALS[id].name}: <b>${Math.ceil(n)}</b>`).join('<br>');
+ const slots=(state.buildings.residence||0)>=15?3:(state.buildings.residence||0)>=10?2:(state.buildings.residence||0)>=5?1:0;
+ const owned=Object.values(state.world.oases).filter(x=>x.owner==='player').length;
+ const g=Object.values(o.garrison||{}).reduce((a,b)=>a+b,0);
+ const claim=o.cleared&&!o.owner?`<p>✅ Deze oase is vrijgemaakt. Open de <b>residentie</b> om haar te claimen (niveau 5, 10 of 15).</p>`:'';
+ const attack=!o.cleared&&!o.owner?`<h3>⚔️ Aanvallen</h3><p class="subtle">Eenheden reizen met de langzaamste deelnemer. De uitkomst wordt bij aankomst berekend.</p>${unitInputRows(Object.keys(INFANTRY),'pk-send',state.army.units)}<button class="action" id="pk-attack">Stuur aanval</button>`:'';
+ const reinforce=o.owner==='player'?`<h3>🛡️ Garnizoen</h3><p>Gestationeerd: ${g} · <b>${oasisStatus(o)}</b>${g<2&&o.unprotectedSince!==null?` · ${clockTime(now()-o.unprotectedSince)} onbewaakt`:''}</p><p class="subtle">Twee soldaten beschermen deze oase volledig tegen wilde dieren.</p>${unitInputRows(Object.keys(INFANTRY),'pk-send',state.army.units)}<button class="action" id="pk-reinforce">Versterking sturen</button><h3>Troepen terugroepen</h3>${unitInputRows(Object.keys(INFANTRY),'pk-recall',o.garrison||{})}<button class="small-btn" id="pk-recall-units">Terugroepen</button>`:'';
+ modal(`<h2>🌿 ${safeText(TYPES[o.resource].resource)}oase +${o.bonus*100}%</h2><p>Terrein: ${t.name} · ${q} | ${r}</p><p><b>Status:</b> ${oasisStatus(o)}</p>${!o.cleared&&!o.owner?`<h3>Wilde dieren</h3><p>${animals||'Geen dieren'}</p>`:''}${claim}${attack}${reinforce}`);
+ const bind=(id,cb)=>{const el=document.getElementById(id);if(el)el.onclick=cb};
+ bind('pk-attack',()=>sendOasisMission(o,'attack'));bind('pk-reinforce',()=>sendOasisMission(o,'reinforce'));bind('pk-recall-units',()=>sendOasisReinforcementHome(o));
 }
 
 function renderQueue(){
@@ -544,7 +755,7 @@ function render(){
   const mainEl=$('#main');
   if(screen!=='map'||!mainEl.querySelector('#kingdomWorld')){
     mainEl.innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();
-    if(screen==='map')setupWorld();
+    if(screen==='map'){setupWorld();const reports=document.getElementById('pk-map-reports');if(reports)reports.onclick=showReports;}
   }
   renderQueue();
   refreshLiveTimers();
@@ -616,7 +827,7 @@ function showField(id){
 
 // v0.12.2: render read-only timer values without recreating open modals every second.
 function clockTime(ms){let sec=Math.max(0,Math.ceil(ms/1000));return `${Math.floor(sec/3600)>0?String(Math.floor(sec/3600))+':':''}${String(Math.floor(sec%3600/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
-function troopAtHome(){let sc=state.army.scout;return Math.max(0,state.army.scouts-((sc.travel||sc.q!==0||sc.r!==0)?1:0))}
+function troopAtHome(){let sc=state.army.scout;return Math.max(0,state.army.scouts-((sc.travel||sc.q!==0||sc.r!==0)?(sc.missionCount||1):0))}
 function trainingQueueHtml(filter=null){
  const entries=armyTrainingEntries();const pending=filter?entries.filter(x=>x.type===filter):entries;
  if(!pending.length)return '<p class="subtle">Geen eenheden in training.</p>';
@@ -632,11 +843,11 @@ function bindTroopDetails(){document.querySelectorAll('#modal [data-troop-detail
 function scoutingHtml(){
  const a=state.army,sc=a.scout,t=a.training[0],ts=a.trainingStarted||{};
  let first=t?`<div class="pk-timer-row"><b>Volgende verkenner klaar over</b><strong data-timer-end="${t}">${clockTime(t-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${t}" data-training-start="${ts[String(t)]||t-1400000}" style="width:0%"></div></div>`:'<p class="subtle">Geen verkenners in training.</p>';
- let expedition=sc.travel?`<div class="pk-movement"><b>🧭 ${sc.travel.returning?'Terug naar thuisdorp':'Ontdekking · heenreis'}</b><p>Troepen: 1 verkenner<br>Actuele hexagon: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
+ let expedition=sc.travel?`<div class="pk-movement"><b>🧭 ${sc.travel.returning?'Terug naar thuisdorp':'Ontdekking · heenreis'}</b><p>Troepen: ${sc.missionCount||1} verkenner(s)<br>Actuele hexagon: ${sc.q} | ${sc.r}<br>Bestemming: <b>${sc.travel.q} | ${sc.travel.r}</b></p><div class="pk-timer-row"><span>Resterende reistijd</span><strong data-timer-end="${sc.travel.end}">${clockTime(sc.travel.end-now())}</strong></div></div>`:
  (sc.q!==0||sc.r!==0?`<div class="pk-movement"><b>🧭 Op verkenning</b><p>1 verkenner bevindt zich op <b>${sc.q} | ${sc.r}</b> en wacht op een nieuwe opdracht.</p></div>`:'<p class="subtle">Er zijn geen troepen onderweg.</p>');
  const stationed=[...(troopAtHome()>0?[['scout','Verkenner',UNIT_ICON_SCOUT,troopAtHome()]]:[]),...Object.entries(INFANTRY).filter(([id])=>(a.units[id]||0)>0).map(([id,d])=>[id,d.name,d.icon,a.units[id]])];
  const garrison=stationed.length?stationed.map(([id,name,icon,count])=>`<div class="pk-troop-item"><button type="button" data-troop-detail="${id}" class="pk-troop-toggle"><img src="${icon}" width="24" height="24" alt=""> <span>${name}: <b>${count}</b></span> <span>⌄</span></button><div hidden>${unitStatsHtml(id)}</div></div>`).join(''):'<p class="subtle">Er zijn geen troepen in het dorp.</p>';
- return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()+Object.values(a.units).reduce((n,v)=>n+v,0)}</b><small>In dorp</small></div><div><b>${sc.travel?1:0}</b><small>Onderweg</small></div><div><b>${armyTrainingEntries().length}</b><small>In training</small></div></div><p>🌾 Graanverbruik troepen: <b>${upkeepPerHour()} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}${a.scouts&&(sc.travel||sc.q!==0||sc.r!==0)&&!sc.travel?.returning?'<button type="button" class="action" id="recallScout">🏠 Troepen naar huis sturen</button>':''}<h3>Garnizoen</h3>${garrison}<h3>Training</h3>${trainingQueueHtml()}</section>`;
+ return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${troopAtHome()+Object.values(a.units).reduce((n,v)=>n+v,0)}</b><small>In dorp</small></div><div><b>${sc.travel?(sc.missionCount||1):0}</b><small>Onderweg</small></div><div><b>${armyTrainingEntries().length}</b><small>In training</small></div></div><p>🌾 Graanverbruik troepen: <b>${upkeepPerHour()} per uur</b>${a.losses.length?`<br>⚠️ Gestorven door graantekort: <b>${a.losses.filter(x=>x.reason==='starvation').length}</b>`:''}</p><h3>Troepenbewegingen</h3>${expedition}${a.scouts&&(sc.travel||sc.q!==0||sc.r!==0)&&!sc.travel?.returning&&!sc.missionTarget?'<button type="button" class="action" id="recallScout">🏠 Troepen naar huis sturen</button>':''}<h3>Garnizoen</h3>${garrison}<h3>Training</h3>${trainingQueueHtml()}<h3>📜 Verkennings- en gevechtsrapporten</h3><button class="action" id="pk-open-reports">Rapporten bekijken (${state.world.reports.length})</button>${state.world.missions.length?`<h3>Legerbewegingen</h3>${state.world.missions.map(m=>`<p class="pk-movement">${m.kind==='attack'?'⚔️ Aanval':m.kind==='reinforce'?'🛡️ Versterking':'🏠 Terugreis'} · ${m.q} | ${m.r}<br>${Object.values(m.units).reduce((a,b)=>a+b,0)} soldaten · aankomst over <span data-timer-end="${m.arrive}">${clockTime(m.arrive-now())}</span></p>`).join('')}`:''}</section>`;
 }
 function refreshLiveTimers(){
  const m=document.getElementById('modal');if(!m||document.getElementById('modalBackdrop').classList.contains('hidden'))return;
@@ -664,12 +875,20 @@ function showBuilding(id){
     id==='smithy'?'De smederij wordt later de plek om wapens en uitrusting te verbeteren. Voor nu kun je hem bouwen en verbeteren.':
     id==='academy'?`Onderzoek hier nieuwe infanterie. Huidige onderzoekstijdbesparing: ${Math.round((1-speedFactor(level))*100)}%.`:
     id==='stables'?'Hier trainen we later onze cavalerie. Nu kun je de stallen bouwen en verbeteren.':
-    id==='residence'?'De residentie wordt later belangrijk bij het stichten en beheren van nieuwe dorpen.':
+    id==='residence'?'Met residentie niveau 5, 10 en 15 kun je maximaal 1, 2 of 3 wilde oases claimen. Kolonisten volgen later.':
     id==='workshop'?'Hier bouwen we later belegeringswerktuigen zoals stormrammen en katapulten.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
   modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost)}${affordability(cost)}<p class="subtle">Bouwtijd: ${clockTime(buildDuration(next))}</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
-  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;bindTroopDetails();}
+  if(id==='residence'){
+    const current=Object.values(state.world.oases||{}).filter(o=>o.owner==='player').length;
+    const limit=level>=15?3:level>=10?2:level>=5?1:0;
+    const free=Object.values(state.world.oases||{}).filter(o=>o.cleared&&!o.owner&&state.world.discovered.includes(oasisKey(o.q,o.r)));
+    const panel=`<section class="pk-residence-oases"><hr><h3>🌿 Oasebeheer</h3><p>Geclaimde oases: <b>${current}/${limit}</b> · niveaus 5 / 10 / 15 geven 1 / 2 / 3 plaatsen.</p>${free.length?free.map(o=>`<div class="pk-report-item"><b>${TYPES[o.resource].resource}oase +${o.bonus*100}% (${o.q} | ${o.r})</b><button class="action" data-residence-claim="${oasisKey(o.q,o.r)}" ${current>=limit?'disabled':''}>Oase claimen</button></div>`).join(''):'<p class="subtle">Er zijn nog geen vrijgemaakte oases beschikbaar.</p>'}</section>`;
+    $('#modal').insertAdjacentHTML('beforeend',panel);
+    document.querySelectorAll('[data-residence-claim]').forEach(b=>b.onclick=()=>{const o=state.world.oases[b.dataset.residenceClaim];claimOasis(o);showBuilding('residence');});
+  }
+  if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;bindTroopDetails();const reports=$('#pk-open-reports');if(reports)reports.onclick=showReports;}
   if(id==='academy'&&level>=1){
     const panel=document.createElement('section');panel.className='pk-new-infantry';
     panel.innerHTML='<hr><h3>📚 Troepenonderzoek</h3><p class="subtle">Onderzoek is eenmalig per dorp. Kosten: 130% van de trainingskosten; maximaal één onderzoek tegelijk.</p>';

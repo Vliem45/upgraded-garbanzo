@@ -190,3 +190,24 @@
 
 /* v0.12.6b UI polish */
 .village-name-pill{border:0;cursor:pointer;font:inherit;font-size:12px;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.village-name-pill:active{opacity:.8}.village-name-input{width:100%;border:1px solid #a9946d;border-radius:10px;padding:12px;font:inherit;font-size:16px;background:#fff8e8;margin:10px 0}.pk-inline-unit{width:23px;height:23px;vertical-align:middle;image-rendering:auto}.pk-troop-item{margin:8px 0}.pk-troop-toggle{width:100%;display:flex;gap:10px;align-items:center;text-align:left;border:1px solid #c9b58b;background:#e7d9b8;padding:11px;border-radius:11px;color:var(--ink)}.pk-troop-toggle span:nth-child(2){flex:1}.pk-unit-details{padding:10px 13px;background:#f1e6ce;border:1px solid #d0bb91;border-radius:9px;margin-top:5px}.pk-unit-details[hidden]{display:none}.pk-training-queue{padding:8px 11px;background:#eee0bd;border:1px solid #d7c49c;border-radius:10px;margin:12px 0}.pk-training-queue .subtle{margin:4px 0}.pk-training-queue .meter{margin:8px 0}.scene-head{gap:8px}
+
+/* v0.12.7: oases, expeditions and compact battle reports */
+.pk-map-reports{display:block;margin:10px auto 5px;padding:9px 18px;background:#47694b;color:#fff6dc;border:1px solid #9aaf81;border-radius:12px;font:inherit;font-weight:700;cursor:pointer}
+.pk-mission-box{background:#e8dab9;border:1px solid #c9b586;padding:11px;border-radius:12px;margin-top:14px}
+.pk-mission-box label{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.pk-mission-box input,.pk-mission-rows input{width:74px;max-width:36%;border:1px solid #bea67a;border-radius:8px;padding:8px;font-size:16px;background:#fff7e6}
+.pk-mission-rows{display:grid;gap:6px;margin:12px 0}
+.pk-mission-rows label{display:flex;align-items:center;gap:8px;background:#eadbb8;padding:7px;border-radius:8px}
+.pk-mission-rows img{width:24px;height:24px;object-fit:contain}
+.pk-mission-rows span{flex:1;font-size:14px}
+.pk-report-item{width:100%;display:flex;flex-direction:column;gap:4px;text-align:left;background:#eadcba;color:#2f3128;border:1px solid #c9b88f;border-radius:10px;margin:8px 0;padding:12px;cursor:pointer}
+.pk-report-item small{color:#716b59}
+.pk-report-scroll{overflow-x:auto;margin-bottom:18px;max-width:100%;border:1px solid #d1bd92;border-radius:9px}
+.pk-report-table{border-collapse:collapse;min-width:100%;text-align:center;font-size:13px}
+.pk-report-table th,.pk-report-table td{padding:8px;border:1px solid #dac89e;min-width:64px;white-space:nowrap}
+.pk-report-table th:first-child{position:sticky;left:0;background:#e8d8b5;min-width:64px;z-index:1}
+.pk-report-table thead th{background:#e0cda5}
+.pk-report-table thead th span{display:block;font-size:22px;min-height:26px}
+.pk-report-table thead th img{width:25px;height:25px;object-fit:contain}
+.pk-report-table thead small{display:block;font-weight:400;font-size:9px;white-space:normal;max-width:66px}
+.pk-report-table tbody tr:nth-child(even){background:#eee1c3}
