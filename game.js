@@ -577,9 +577,29 @@ function renderMap(){
   <div class="world-map-shell"><canvas id="kingdomWorld" aria-label="Hexagonwereldkaart"></canvas>
   <div class="map-controls"><button type="button" data-world-zoom="in" aria-label="Inzoomen">＋</button><button type="button" data-world-zoom="out" aria-label="Uitzoomen">−</button><button type="button" data-world-zoom="home" aria-label="Centreer op eigen dorp">⌂</button></div></div>
   <p class="note" id="scoutStatus">Tik op een ontdekt vakje of de rand van de mist om je verkenner automatisch een route te laten lopen.</p>
-  <button type="button" class="pk-map-reports" id="pk-map-reports">📜 Rapporten</button><p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
+  <button type="button" class="pk-map-reports" id="pk-map-reports">📜 Rapporten</button><button type="button" class="pk-map-reports" id="pk-oasis-diagnostic">🧪 Oasecontrole (test)</button><p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
 }
 let mapRedraw=null;
+// Temporary, read-only world diagnostic. Does not regenerate the world or change saves.
+function showOasisDiagnostic(){
+ update();initOases();
+ const oases=Object.values(state.world.oases||{});
+ const revealed=new Set(state.world.discovered||[]);
+ const scouted=state.world.scouted||{};
+ const discovered=oases.filter(o=>revealed.has(oasisKey(o.q,o.r)));
+ const marked=discovered.filter(o=>scouted[oasisKey(o.q,o.r)]||o.owner==='player');
+ const unseenOnMap=discovered.filter(o=>!scouted[oasisKey(o.q,o.r)]&&o.owner!=='player');
+ const nearest=[...oases].sort((a,b)=>hexDistance(a.q,a.r)-hexDistance(b.q,b.r)).slice(0,8);
+ const rare=oases.filter(o=>o.bonus===.5);
+ const row=o=>{const key=oasisKey(o.q,o.r),distance=hexDistance(o.q,o.r);const label=scouted[key]||o.owner==='player'?'Onderzocht':revealed.has(key)?'Terrein zichtbaar, oase verborgen':'Nog in mist';return `<tr><td>${o.q} | ${o.r}</td><td>${distance}</td><td>${o.bonus===.5?'50%':'25%'}</td><td>${label}</td></tr>`};
+ modal(`<h2>🧪 Oasecontrole</h2><p class="subtle">Tijdelijke testfunctie. Alleen lezen: je wereld en spelstand worden niet veranderd.</p>
+ <div class="stats"><div class="stat">Oases op kaart<b>${oases.length}</b></div><div class="stat">Zeldzaam (+50%)<b>${rare.length}</b></div><div class="stat">Oases op onthulde hexagons<b>${discovered.length}</b></div><div class="stat">Met zichtbaar oase-icoon<b>${marked.length}</b></div></div>
+ <p><b>${unseenOnMap.length} oase(s)</b> liggen al op onthulde hexagons, maar missen momenteel nog hun icoon omdat de locatie niet afzonderlijk is onderzocht.</p>
+ <p>Onthulde hexagons: <b>${revealed.size} van ${(WORLD_RADIUS*2+1)**2}</b>. Wereldseed: <b>${state.world.seed}</b>.</p>
+ <h3>8 dichtstbijzijnde oases (testinformatie)</h3>
+ ${oases.length?`<div style="overflow-x:auto"><table style="width:100%;font-size:.85rem;border-collapse:collapse"><thead><tr><th>Coördinaten</th><th>Afstand</th><th>Bonus</th><th>Weergave</th></tr></thead><tbody>${nearest.map(row).join('')}</tbody></table></div>`:'<p class="warning">Er zijn geen oases gegenereerd. Dit is een fout en moet worden hersteld.</p>'}
+ <p class="subtle">Afstanden zijn hexagonstappen vanaf je startdorp. De tabel onthult bewust locaties om de generator te kunnen controleren; dit is geen normaal spelonderdeel.</p>`);
+}
 function setupWorld(){
  const canvas=document.getElementById('kingdomWorld');if(!canvas)return;
  const wrap=canvas.parentElement,ctx=canvas.getContext('2d');
@@ -755,7 +775,7 @@ function render(){
   const mainEl=$('#main');
   if(screen!=='map'||!mainEl.querySelector('#kingdomWorld')){
     mainEl.innerHTML=screen==='fields'?renderFields():screen==='village'?renderVillage():renderMap();
-    if(screen==='map'){setupWorld();const reports=document.getElementById('pk-map-reports');if(reports)reports.onclick=showReports;}
+    if(screen==='map'){setupWorld();const reports=document.getElementById('pk-map-reports');if(reports)reports.onclick=showReports;const diagnostic=document.getElementById('pk-oasis-diagnostic');if(diagnostic)diagnostic.onclick=showOasisDiagnostic;}
   }
   renderQueue();
   refreshLiveTimers();
