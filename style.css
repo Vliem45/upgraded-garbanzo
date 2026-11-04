@@ -211,3 +211,24 @@
 .pk-report-table thead th img{width:25px;height:25px;object-fit:contain}
 .pk-report-table thead small{display:block;font-weight:400;font-size:9px;white-space:normal;max-width:66px}
 .pk-report-table tbody tr:nth-child(even){background:#eee1c3}
+
+/* Project Kingdom v0.12.7a: compact navigation, reporting and upkeep */
+.bottom{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+.bottom button{min-width:0;font-size:11px;padding:8px 2px}
+.bottom button>span{position:relative;display:inline-block;line-height:1.25}
+.pk-unread-badge{position:absolute;right:-13px;top:-5px;background:#aa463a;color:#fff;border-radius:999px;min-width:18px;padding:2px 3px;font:700 10px/1.1 system-ui;text-align:center;border:1px solid #f5d3ac}
+.pk-unread-badge[hidden]{display:none}
+.cost-grid.with-upkeep{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.cost-grid.with-upkeep .cost{padding:8px 1px;font-size:11px;white-space:nowrap}
+.cost-grid.with-upkeep .upkeep-cost{background:#ebd4a5;color:#823e2c}
+.pk-report-tabs{display:flex;gap:5px;flex-wrap:wrap;margin:10px 0}
+.pk-report-tabs .small-btn{padding:8px 10px;font-size:12px}
+.pk-report-tabs .selected{background:#506c4b;color:#fff9e5;border-color:#506c4b}
+.pk-message-row{display:flex;align-items:stretch;gap:5px;margin:7px 0}
+.pk-message-row .pk-report-item{flex:1;min-width:0;margin:0}
+.pk-message-row.unread .pk-report-item{border-left:5px solid #a65b38;background:#e5d4ae}
+.pk-report-delete{background:#e2cfaa;border:1px solid #c9b88f;color:#68553d;border-radius:10px;padding:0 11px;font-size:16px}
+.pk-mission-box select{border:1px solid #bea67a;border-radius:8px;background:#fff7e6;color:#2b3226;min-width:0;font-size:15px;padding:8px;max-width:57%}
+.pk-mission-box label{margin-bottom:9px}
+#scoutStatus>div{padding:4px 0}
+@media(max-width:380px){.cost-grid.with-upkeep .cost{font-size:10px}.bottom button{font-size:10px}}
