@@ -232,3 +232,7 @@
 .pk-mission-box label{margin-bottom:9px}
 #scoutStatus>div{padding:4px 0}
 @media(max-width:380px){.cost-grid.with-upkeep .cost{font-size:10px}.bottom button{font-size:10px}}
+
+/* v0.12.8: compact cavalry placeholders and smithy research cards */
+.pk-emoji-unit{font-size:26px;display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;vertical-align:middle}
+.pk-unit-title{display:flex;align-items:center;gap:8px}

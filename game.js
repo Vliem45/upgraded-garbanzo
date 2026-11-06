@@ -54,8 +54,34 @@ const INFANTRY={
  spear:{name:'Speerdrager',icon:'assets/unit-spear.png',cost:[90,100,35,25],ms:480000,researchMs:900000,attack:15,inf:35,cav:55,speed:6,carry:30,upkeep:1,barracks:1,academy:1},
  sword:{name:'Zwaardkrijger',icon:'assets/unit-sword.png',cost:[150,150,180,40],ms:720000,researchMs:1800000,attack:55,inf:45,cav:25,speed:6,carry:40,upkeep:2,barracks:3,academy:3},
  bow:{name:'Boogschutter',icon:'assets/unit-bow.png',cost:[240,80,110,50],ms:660000,researchMs:2700000,attack:30,inf:55,cav:20,speed:6,carry:20,upkeep:2,barracks:5,academy:5},
- axe:{name:'Bijlkrijger',icon:'assets/unit-axe.png',cost:[270,180,240,110],ms:900000,researchMs:3600000,attack:80,inf:25,cav:15,speed:5,carry:45,upkeep:3,barracks:7,academy:8,smithy:3}
+ axe:{name:'Bijlkrijger',icon:'assets/unit-axe.png',cost:[270,180,240,110],ms:900000,researchMs:3600000,attack:80,inf:25,cav:15,speed:5,carry:45,upkeep:3,barracks:7,academy:8,smithy:3},
+ german:{name:'Germaanse ruiter',icon:'🐎',cost:[600,450,340,180],ms:1200000,researchMs:4500000,attack:120,inf:65,cav:50,speed:14,carry:120,upkeep:3,stables:5,academy:8,smithy:5,cavalry:true},
+ noble:{name:'Edele ruiter',icon:'♞',cost:[600,700,850,240],ms:1800000,researchMs:7200000,attack:180,inf:80,cav:105,speed:10,carry:70,upkeep:4,stables:10,academy:10,smithy:10,cavalry:true}
 };
+const unitIconHtml=id=>INFANTRY[id]?.icon?.startsWith('assets/')?`<img src="${INFANTRY[id].icon}" width="28" height="28" alt="">`:`<span class="pk-emoji-unit">${INFANTRY[id]?.icon||'⚔️'}</span>`;
+const unitEffectiveStat=(id,stat)=>{const base=INFANTRY[id]?.[stat]||0;return base*(1+.01*(state.smithyResearch?.levels?.[id]||0));};
+// Wall fortifies only village defense. Oasis wildlife never benefits from a player's wall.
+const wallFactor=()=>Math.pow(1.035,Math.max(0,Math.min(20,state.buildings.wall||0)));
+function villageDefensePower(units,cavalryShare=0){
+ const share=Math.max(0,Math.min(1,cavalryShare));
+ const troopDef=Object.entries(units||{}).reduce((v,[id,n])=>v+Math.max(0,n)*((1-share)*unitEffectiveStat(id,'inf')+share*unitEffectiveStat(id,'cav')),0);
+ return (troopDef+10*Math.max(0,state.buildings.wall||0))*wallFactor();
+}
+function initSmithyResearch(){
+ if(!state.smithyResearch||typeof state.smithyResearch!=='object')state.smithyResearch={levels:{},queue:[]};
+ if(!state.smithyResearch.levels||typeof state.smithyResearch.levels!=='object')state.smithyResearch.levels={};
+ if(!Array.isArray(state.smithyResearch.queue))state.smithyResearch.queue=[];
+}
+const smithyResearchCost=(id,level)=>INFANTRY[id].cost.map(v=>Math.ceil(v*2*Math.pow(1.2,level-1)));
+const smithyResearchMs=level=>Math.max(1000,Math.round(1200000*Math.pow(1.15,level-1)*speedFactor(state.buildings.smithy||1)));
+function resolveSmithyResearch(at){
+ initSmithyResearch();
+ while(state.smithyResearch.queue.length&&state.smithyResearch.queue[0].end<=at){
+  const item=state.smithyResearch.queue.shift();
+  state.smithyResearch.levels[item.type]=Math.max(state.smithyResearch.levels[item.type]||0,item.level);
+ }
+}
+
 const researchCost=def=>def.cost.map(n=>Math.ceil((n*13-0.000001)/10));
 function initResearch(){
  if(!state.research||typeof state.research!=='object')state.research={done:{},queue:null};
@@ -66,7 +92,7 @@ function resolveResearch(at){
  initResearch();const q=state.research.queue;
  if(q&&q.end<=at){if(INFANTRY[q.type])state.research.done[q.type]=true;state.research.queue=null;}
 }
-function researchRequirements(def){return (state.buildings.barracks||0)>=def.barracks&&(state.buildings.academy||0)>=def.academy&&(!def.smithy||(state.buildings.smithy||0)>=def.smithy)}
+function researchRequirements(def){return (!def.barracks||(state.buildings.barracks||0)>=def.barracks)&&(!def.stables||(state.buildings.stables||0)>=def.stables)&&(state.buildings.academy||0)>=def.academy&&(!def.smithy||(state.buildings.smithy||0)>=def.smithy)}
 const UNIT_ICON_SCOUT='assets/unit-scout.png';
 const HORSE_SCOUT={name:'Bereden verkenner',icon:'🐎',cost:[200,150,250,100],ms:900000,researchMs:2700000,attack:0,inf:15,cav:10,speed:18,carry:50,upkeep:2};
 const SCOUT_TYPES={scout:{name:'Verkenner',icon:'🥾',speed:9,vision:1,upkeep:1},horse:{name:'Bereden verkenner',icon:'🐎',speed:18,vision:2,upkeep:2}};
@@ -76,7 +102,7 @@ function armyTrainingEntries(){return [...state.army.training.map(t=>({end:t,typ
 function lastTrainingEnd(){const list=armyTrainingEntries();return list.length?list[list.length-1].end:0}
 function maxUnitOrder(def){return Math.max(0,Math.min(500,...RES.map((r,i)=>Math.floor((state.stock[r]+0.00000001)/def.cost[i]))))}
 function unitAvailable(type){return type==='scout'?scoutAvailable('scout'):(state.army.units[type]||0)}
-function nextArmyTrainingBoundary(cursor){const ends=[...armyTrainingEntries().map(t=>t.end),...(state.army.mountedTraining||[]),state.army.mountedResearch?.queue?.end].filter(t=>Number.isFinite(t)&&t>cursor);return ends.length?Math.min(...ends):Infinity}
+function nextArmyTrainingBoundary(cursor){const ends=[...armyTrainingEntries().map(t=>t.end),...(state.army.mountedTraining||[]),...(state.army.cavalryTraining||[]).map(t=>t.end),...(state.smithyResearch?.queue||[]).map(t=>t.end),state.army.mountedResearch?.queue?.end].filter(t=>Number.isFinite(t)&&t>cursor);return ends.length?Math.min(...ends):Infinity}
 function unitUnlocked(def){return researchRequirements(def)&&!!state.research.done[Object.keys(INFANTRY).find(id=>INFANTRY[id]===def)]}
 
 function initScouts(){
@@ -89,6 +115,7 @@ function initScouts(){
  if(!Array.isArray(state.army.losses))state.army.losses=[];
  if(!state.army.units||typeof state.army.units!=='object')state.army.units={};
  if(!Array.isArray(state.army.unitTraining))state.army.unitTraining=[];
+ if(!Array.isArray(state.army.cavalryTraining))state.army.cavalryTraining=[];
  if(!Number.isInteger(state.army.scout.q))state.army.scout.q=0;
  if(!Number.isInteger(state.army.scout.r))state.army.scout.r=0;
  if(!Number.isFinite(state.army.mountedScouts))state.army.mountedScouts=0;
@@ -159,6 +186,7 @@ function resolveArmyTraining(time){
  while(state.army.training.length&&state.army.training[0]<=time){const done=state.army.training.shift();delete state.army.trainingStarted[String(done)];state.army.scouts++;}
  while(state.army.unitTraining.length&&state.army.unitTraining[0].end<=time){const finished=state.army.unitTraining.shift();state.army.units[finished.type]=(state.army.units[finished.type]||0)+1;}
  while(state.army.mountedTraining.length&&state.army.mountedTraining[0]<=time){state.army.mountedTraining.shift();state.army.mountedScouts++;}
+ while(state.army.cavalryTraining.length&&state.army.cavalryTraining[0].end<=time){const item=state.army.cavalryTraining.shift();state.army.units[item.type]=(state.army.units[item.type]||0)+1;}
  const research=state.army.mountedResearch;if(research.queue&&research.queue.end<=time){research.queue=null;research.done=true;}
 }
 function expeditionStepMs(type){return Math.round(3600000/SCOUT_TYPES[type].speed)}
@@ -198,6 +226,7 @@ const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse
 function perHour(r){const base=25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0);return base*(1+oasisBonus(r))}
 function update(){
  const t=now();initWorld();initScouts();initResearch();initOases();
+ initSmithyResearch();
  let cursor=Math.min(t,state.last||t),safety=0;
  // Event-based offline progression: finish construction and training in chronological order.
  while(cursor<t&&safety++<10000){
@@ -216,7 +245,7 @@ function update(){
    if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;
    state.queue=null;
   }
-  resolveArmyTraining(cursor);resolveResearch(cursor);
+  resolveArmyTraining(cursor);resolveResearch(cursor);resolveSmithyResearch(cursor);
  }
  // Legacy saves may have timers ending before their saved last-update timestamp.
  if(state.queue&&state.queue.end<=t){const q=state.queue;if(q.kind==='field')state.fields[q.id].level++;if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;state.queue=null;}
@@ -244,7 +273,7 @@ const buildingPrice=(id,lvl)=>BLD[id].base.map(c=>Math.ceil(c*Math.pow(1.3,Math.
 const enough=c=>RES.every((r,i)=>state.stock[r]>=c[i]);
 function startBuild(kind,id,cost,next){
   update();
-  if(state.queue||!enough(cost))return;
+  if(state.queue||!enough(cost)||next>20)return;
   RES.forEach((r,i)=>state.stock[r]-=cost[i]);
   state.queue={kind,id,next,start:now(),end:now()+buildDuration(next)};
   save();
@@ -490,8 +519,10 @@ function splitLosses(counts,lossRatio,atLeastOne=false){
  return survivors;
 }
 function fightOasis(o,attackers){
- const atk=Object.entries(attackers).reduce((s,[id,n])=>s+(INFANTRY[id]?.attack||0)*n,0);
- const def=Object.entries(o.animals).reduce((s,[id,n])=>s+(ANIMALS[id]?.inf||0)*Math.ceil(n),0)*1.05;
+ const atk=Object.entries(attackers).reduce((s,[id,n])=>s+unitEffectiveStat(id,'attack')*n,0);
+ const cavalryAttack=Object.entries(attackers).reduce((v,[id,n])=>v+(INFANTRY[id]?.cavalry?unitEffectiveStat(id,'attack')*n:0),0);
+ const share=atk>0?cavalryAttack/atk:0;
+ const def=Object.entries(o.animals).reduce((s,[id,n])=>s+((1-share)*(ANIMALS[id]?.inf||0)+share*(ANIMALS[id]?.cav??ANIMALS[id]?.inf??0))*Math.ceil(n),0)*1.05;
  const winner=atk>def;
  const ratio=Math.pow(Math.min(atk,def)/Math.max(1,atk,def),1.5);
  const survivingAttackers=winner?splitLosses(attackers,ratio):{};
@@ -564,7 +595,7 @@ function claimOasis(o){
  if(claimed>=slots)return;
  o.owner='player';o.unprotectedSince=now();o.garrison={};save();showWorldTile(o.q,o.r);renderResources();
 }
-function unitInputRows(ids,prefix,counts){return `<div class="pk-mission-rows">${ids.filter(id=>(counts[id]||0)>0).map(id=>`<label><img src="${INFANTRY[id].icon}" alt=""><span>${INFANTRY[id].name} (${counts[id]})</span><input id="${prefix}-${id}" type="number" min="0" max="${counts[id]}" value="0" inputmode="numeric"></label>`).join('')}</div>`}
+function unitInputRows(ids,prefix,counts){return `<div class="pk-mission-rows">${ids.filter(id=>(counts[id]||0)>0).map(id=>`<label>${unitIconHtml(id)}<span>${INFANTRY[id].name} (${counts[id]})</span><input id="${prefix}-${id}" type="number" min="0" max="${counts[id]}" value="0" inputmode="numeric"></label>`).join('')}</div>`}
 let reportFilter='all';
 const reportCategory=r=>r.kind==='scout'?'scout':r.kind==='battle'?'battle':'other';
 function unreadReports(){return (state.world?.reports||[]).filter(r=>r.read===false).length;}
@@ -580,7 +611,7 @@ function showReports(){
 }
 function reportTable(title,counts,left,animals=false){
  const ids=Object.keys(counts||{}).filter(id=>counts[id]>0);const defs=animals?ANIMALS:INFANTRY;
- return `<h3>${title}</h3><div class="pk-report-scroll"><table class="pk-report-table"><thead><tr><th></th>${ids.map(id=>`<th title="${safeText(defs[id]?.name||id)}"><span>${animals?defs[id]?.icon:`<img src="${defs[id]?.icon}" alt="">`}</span><small>${safeText(defs[id]?.name||id)}</small></th>`).join('')}</tr></thead><tbody><tr><th>Aantal</th>${ids.map(id=>`<td>${Math.round(counts[id])}</td>`).join('')}</tr><tr><th>Verlies</th>${ids.map(id=>`<td>${Math.max(0,Math.round(counts[id])-Math.round(left[id]||0))}</td>`).join('')}</tr><tr><th>Over</th>${ids.map(id=>`<td>${Math.round(left[id]||0)}</td>`).join('')}</tr></tbody></table></div>`;
+ return `<h3>${title}</h3><div class="pk-report-scroll"><table class="pk-report-table"><thead><tr><th></th>${ids.map(id=>`<th title="${safeText(defs[id]?.name||id)}"><span>${animals?defs[id]?.icon:unitIconHtml(id)}</span><small>${safeText(defs[id]?.name||id)}</small></th>`).join('')}</tr></thead><tbody><tr><th>Aantal</th>${ids.map(id=>`<td>${Math.round(counts[id])}</td>`).join('')}</tr><tr><th>Verlies</th>${ids.map(id=>`<td>${Math.max(0,Math.round(counts[id])-Math.round(left[id]||0))}</td>`).join('')}</tr><tr><th>Over</th>${ids.map(id=>`<td>${Math.round(left[id]||0)}</td>`).join('')}</tr></tbody></table></div>`;
 }
 function showReport(index){
  const r=state.world.reports[index];if(!r)return;r.read=true;save();renderUnread();
@@ -837,14 +868,14 @@ function trainingQueueHtml(filter=null){
  const start=Number.isFinite(stored)?stored:Math.min(prev,next.end-base);
  return `<div class="pk-training-queue"><div class="pk-timer-row"><span>Volgende ${next.type==='scout'?'verkenner':INFANTRY[next.type]?.name.toLowerCase()||'eenheid'} gereed over</span><strong data-timer-end="${next.end}">${clockTime(next.end-now())}</strong></div><div class="meter pk-training-meter"><div data-training-progress="${next.end}" data-training-start="${start}"></div></div><p class="subtle">${pending.length} in training · Laatste gereed over <span data-timer-end="${pending[pending.length-1].end}">${clockTime(pending[pending.length-1].end-now())}</span></p></div>`;
 }
-function unitStatsHtml(type){const d=INFANTRY[type];const scout=type==='scout',horse=type==='horse';return `<div class="pk-unit-details"><p><b>Aanval:</b> ${scout?0:horse?0:d.attack}<br><b>Verdediging tegen infanterie:</b> ${scout?10:horse?15:d.inf}<br><b>Verdediging tegen cavalerie:</b> ${scout?5:horse?10:d.cav}<br><b>Snelheid:</b> ${scout?9:horse?18:d.speed} velden/u<br><b>Draagkracht:</b> ${scout?25:horse?50:d.carry}<br><b>Graanverbruik:</b> ${scout?1:horse?2:d.upkeep} per uur</p><b>Trainingskosten</b>${costHtml(scout?SCOUT_COST:horse?HORSE_SCOUT.cost:d.cost)}</div>`}
+function unitStatsHtml(type){const d=INFANTRY[type];const scout=type==='scout',horse=type==='horse';return `<div class="pk-unit-details"><p><b>Aanval:</b> ${scout?0:horse?0:unitEffectiveStat(type,'attack').toLocaleString('nl-NL',{maximumFractionDigits:2})}<br><b>Verdediging tegen infanterie:</b> ${scout?10:horse?15:unitEffectiveStat(type,'inf').toLocaleString('nl-NL',{maximumFractionDigits:2})}<br><b>Verdediging tegen cavalerie:</b> ${scout?5:horse?10:unitEffectiveStat(type,'cav').toLocaleString('nl-NL',{maximumFractionDigits:2})}<br><b>Snelheid:</b> ${scout?9:horse?18:d.speed} velden/u<br><b>Draagkracht:</b> ${scout?25:horse?50:d.carry}<br><b>Graanverbruik:</b> ${scout?1:horse?2:d.upkeep} per uur</p>${!scout&&!horse?`<p><b>Uitrusting:</b> niveau ${state.smithyResearch?.levels?.[type]||0} (+${state.smithyResearch?.levels?.[type]||0}% gevechtskracht)</p>`:''}<b>Trainingskosten</b>${costHtml(scout?SCOUT_COST:horse?HORSE_SCOUT.cost:d.cost)}</div>`}
 function bindTroopDetails(){document.querySelectorAll('#modal [data-troop-detail]').forEach(b=>b.onclick=()=>{const detail=b.nextElementSibling;if(detail)detail.hidden=!detail.hidden;});}
 function scoutingHtml(){
  const a=state.army;
  const stationed=[...(scoutAvailable('scout')>0?[['scout','Verkenner',UNIT_ICON_SCOUT,scoutAvailable('scout')]]:[]),...(scoutAvailable('horse')>0?[['horse','Bereden verkenner',null,scoutAvailable('horse')]]:[]),...Object.entries(INFANTRY).filter(([id])=>(a.units[id]||0)>0).map(([id,d])=>[id,d.name,d.icon,a.units[id]])];
- const garrison=stationed.length?stationed.map(([id,name,icon,count])=>`<div class="pk-troop-item"><button type="button" data-troop-detail="${id}" class="pk-troop-toggle">${icon?`<img src="${icon}" width="24" height="24" alt="">`:'🐎'} <span>${name}: <b>${count}</b></span> <span>⌄</span></button><div hidden>${unitStatsHtml(id)}</div></div>`).join(''):'<p class="subtle">Er zijn geen troepen in het dorp.</p>';
+ const garrison=stationed.length?stationed.map(([id,name,icon,count])=>`<div class="pk-troop-item"><button type="button" data-troop-detail="${id}" class="pk-troop-toggle">${icon?icon.startsWith('assets/')?`<img src="${icon}" width="24" height="24" alt="">`:icon:'🐎'} <span>${name}: <b>${count}</b></span> <span>⌄</span></button><div hidden>${unitStatsHtml(id)}</div></div>`).join(''):'<p class="subtle">Er zijn geen troepen in het dorp.</p>';
  const expedition=a.expeditions.length?a.expeditions.map(m=>`<div class="pk-movement"><b>${SCOUT_TYPES[m.type].icon} ${SCOUT_TYPES[m.type].name} · ${m.count} eenheden</b><p>Bestemming: ${m.target.q} | ${m.target.r} · ${m.travel.returning?'Terugreis':'Heenreis'}</p><div>Resterend: <strong data-timer-end="${m.travel.end}">${clockTime(m.travel.end-now())}</strong></div></div>`).join(''):'<p class="subtle">Er zijn geen expedities onderweg.</p>';
- return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${scoutAvailable('scout')+scoutAvailable('horse')+Object.values(a.units).reduce((n,v)=>n+v,0)}</b><small>In dorp</small></div><div><b>${a.expeditions.reduce((n,m)=>n+m.count,0)}</b><small>Verkenners onderweg</small></div><div><b>${armyTrainingEntries().length+a.mountedTraining.length}</b><small>In training</small></div></div><p>🌾 Graanverbruik troepen: <b>${upkeepPerHour()} per uur</b></p><h3>Lopende expedities</h3>${expedition}<h3>Garnizoen</h3>${garrison}<h3>Training</h3>${trainingQueueHtml()}<h3>📜 Rapporten</h3><button class="action" id="pk-open-reports">Berichten bekijken (${state.world.reports.length})</button>${state.world.missions.length?`<h3>Legerbewegingen</h3>${state.world.missions.map(m=>`<p class="pk-movement">${m.kind==='attack'?'⚔️ Aanval':m.kind==='reinforce'?'🛡️ Versterking':'🏠 Terugreis'} · ${m.q} | ${m.r}<br>${Object.values(m.units).reduce((a,b)=>a+b,0)} soldaten · aankomst over <span data-timer-end="${m.arrive}">${clockTime(m.arrive-now())}</span></p>`).join('')}`:''}</section>`;
+ return `<section class="pk-army"><hr><h3>🚩 Troepenoverzicht</h3><div class="pk-army-stats"><div><b>${scoutAvailable('scout')+scoutAvailable('horse')+Object.values(a.units).reduce((n,v)=>n+v,0)}</b><small>In dorp</small></div><div><b>${a.expeditions.reduce((n,m)=>n+m.count,0)}</b><small>Verkenners onderweg</small></div><div><b>${armyTrainingEntries().length+a.mountedTraining.length+a.cavalryTraining.length}</b><small>In training</small></div></div><p>🌾 Graanverbruik troepen: <b>${upkeepPerHour()} per uur</b></p><h3>Lopende expedities</h3>${expedition}<h3>Garnizoen</h3>${garrison}<h3>Training</h3>${trainingQueueHtml()}<h3>📜 Rapporten</h3><button class="action" id="pk-open-reports">Berichten bekijken (${state.world.reports.length})</button>${state.world.missions.length?`<h3>Legerbewegingen</h3>${state.world.missions.map(m=>`<p class="pk-movement">${m.kind==='attack'?'⚔️ Aanval':m.kind==='reinforce'?'🛡️ Versterking':'🏠 Terugreis'} · ${m.q} | ${m.r}<br>${Object.values(m.units).reduce((a,b)=>a+b,0)} soldaten · aankomst over <span data-timer-end="${m.arrive}">${clockTime(m.arrive-now())}</span></p>`).join('')}`:''}</section>`;
 }
 function refreshLiveTimers(){
  const m=document.getElementById('modal');if(!m||document.getElementById('modalBackdrop').classList.contains('hidden'))return;
@@ -866,17 +897,44 @@ function showBuilding(id){
     id==='warehouse'?`Opslag hout, klei en erts: ${fmt(storageCap(level))} → ${fmt(storageCap(next))}`:
     id==='granary'?`Graanopslag: ${fmt(storageCap(level))} → ${fmt(storageCap(next))}`:
     id==='main'?`Het hoofdgebouw versnelt het bouwen en verbeteren van gebouwen en velden. Huidige bouwtijdbesparing: ${Math.round((1-speedFactor(level))*100)}%.`:
-    id==='wall'?'De stadsmuur omringt het dorp. Verdediging voegen we later toe, maar je kunt hem nu al bouwen en verbeteren.':
+    id==='wall'?`De stadsmuur geeft <b>+${((wallFactor()-1)*100).toFixed(1)}%</b> verdediging en <b>${10*level}</b> basisverdediging. Alleen bij dorpsverdediging; niet bij oases.`:
     id==='barracks'?`Train hier verkenners en onderzochte infanterie. Huidige trainingstijdbesparing: ${Math.round((1-speedFactor(level))*100)}%.`:
     id==='market'?'De marktplaats wordt later de plek voor handel en transport. Voor nu kun je hem bouwen en verbeteren.':
-    id==='smithy'?'De smederij wordt later de plek om wapens en uitrusting te verbeteren. Voor nu kun je hem bouwen en verbeteren.':
-    id==='academy'?`Onderzoek hier nieuwe infanterie. Huidige onderzoekstijdbesparing: ${Math.round((1-speedFactor(level))*100)}%.`:
-    id==='stables'?'Hier train je bereden verkenners nadat je ze in de academie hebt onderzocht.':
+    id==='smithy'?'Verbeter hier per troepensoort de uitrusting. Ieder niveau geeft +1% aanval en beide verdedigingen aan alle bestaande en toekomstige troepen van dit type.':
+    id==='academy'?`Onderzoek hier nieuwe infanterie en cavalerie. Huidige onderzoekstijdbesparing: ${Math.round((1-speedFactor(level))*100)}%.`:
+    id==='stables'?'Hier train je bereden verkenners en onderzochte cavalerie. Hogere stallen versnellen de training.':
     id==='residence'?'Met residentie niveau 5, 10 en 15 kun je maximaal 1, 2 of 3 wilde oases claimen. Kolonisten volgen later.':
     id==='workshop'?'Hier bouwen we later belegeringswerktuigen zoals stormrammen en katapulten.':
     'De verzamelplaats is de vaste plek voor troepenbewegingen. Gevechten en troepen volgen later.';
-  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost,(BUILDING_POP[id]||0)+levelBand(next))}${affordability(cost)}<p class="subtle">Bouwtijd: ${clockTime(buildDuration(next))}</p><button class="action" id="doBuild" ${state.queue||!enough(cost)?'disabled':''}>${state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
+  modal(`<h2>${BLD[id].icon} ${BLD[id].name}</h2><p>Huidig niveau: ${level}</p><p>${info}</p><p><b>${level?'Upgrade':'Bouwen'} naar niveau ${next}</b></p>${costHtml(cost,(BUILDING_POP[id]||0)+levelBand(next))}${affordability(cost)}<p class="subtle">Bouwtijd: ${clockTime(buildDuration(next))}</p><button class="action" id="doBuild" ${state.queue||!enough(cost)||level>=20?'disabled':''}>${level>=20?'Maximaal niveau bereikt':state.queue?'Er loopt al een bouwopdracht':!enough(cost)?'Niet genoeg grondstoffen':level?'Gebouw verbeteren':'Gebouw plaatsen'}</button>`);
   $('#doBuild').onclick=()=>startBuild('building',id,cost,next);
+  if(id==='smithy'&&level>=1){
+    initSmithyResearch();
+    const panel=document.createElement('section');panel.className='pk-new-infantry';
+    const jobs=state.smithyResearch.queue;
+    panel.innerHTML=`<hr><h3>⚒️ Uitrustingsonderzoek</h3><p class="subtle">Eén upgradepad per eenheid: +1% aanval en beide verdedigingswaarden per niveau. Maximaal niveau ${Math.min(20,level)}. Onderzoek geldt voor alle bestaande en toekomstige eenheden in dit dorp.</p>${jobs.length?`<p><b>Onderzoek bezig:</b> ${INFANTRY[jobs[0].type].name} naar niveau ${jobs[0].level} · <strong data-timer-end="${jobs[0].end}">${clockTime(jobs[0].end-now())}</strong></p><p class="subtle">Wachtrij: ${jobs.length} onderzoek(en)</p>`:''}`;
+    $('#modal').appendChild(panel);
+    for(const [type,def] of Object.entries(INFANTRY)){
+      if(!state.research.done[type])continue;
+      const current=state.smithyResearch.levels[type]||0;
+      const planned=jobs.filter(j=>j.type===type).reduce((v,j)=>Math.max(v,j.level),current);
+      const nextLevel=planned+1,canResearch=nextLevel<=Math.min(20,level);
+      const costs=canResearch?smithyResearchCost(type,nextLevel):null;
+      const ms=canResearch?smithyResearchMs(nextLevel):0;
+      const box=document.createElement('div');box.className='pk-unit-card';
+      box.innerHTML=`<div class="pk-unit-title">${unitIconHtml(type)}<b>${def.name}</b></div><p>Uitrusting <b>niveau ${current}/${Math.min(20,level)}</b> · +${current}% aanval en verdediging</p>${canResearch?`<p>Volgende upgrade: niveau <b>${nextLevel}</b> (+${nextLevel}%) · basisonderzoek ${clockTime(ms)}</p>${costHtml(costs)}<button class="action" ${!enough(costs)?'disabled':''}>${!enough(costs)?'Niet genoeg grondstoffen':'Onderzoek toevoegen aan wachtrij'}</button>`:'<p class="subtle">Maximaal niveau bereikt voor huidige smederij.</p>'}`;
+      panel.appendChild(box);
+      const button=box.querySelector('button');if(button)button.onclick=()=>{
+        update();initSmithyResearch();const scheduled=state.smithyResearch.queue.filter(j=>j.type===type).reduce((v,j)=>Math.max(v,j.level),state.smithyResearch.levels[type]||0)+1;
+        if(scheduled>Math.min(20,state.buildings.smithy||0))return;
+        const price=smithyResearchCost(type,scheduled);if(!enough(price))return;
+        RES.forEach((r,i)=>state.stock[r]-=price[i]);
+        const start=Math.max(now(),state.smithyResearch.queue.at(-1)?.end||0);
+        state.smithyResearch.queue.push({type,level:scheduled,start,end:start+smithyResearchMs(scheduled)});
+        save();showBuilding('smithy');renderResources();
+      };
+    }
+  }
   if(id==='residence'){
     const current=Object.values(state.world.oases||{}).filter(o=>o.owner==='player').length;
     const limit=level>=15?3:level>=10?2:level>=5?1:0;
@@ -888,7 +946,7 @@ function showBuilding(id){
   if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;bindTroopDetails();const reports=$('#pk-open-reports');if(reports)reports.onclick=showReports;}
   if(id==='academy'&&level>=1){
     const panel=document.createElement('section');panel.className='pk-new-infantry';
-    panel.innerHTML='<hr><h3>📚 Troepenonderzoek</h3><p class="subtle">Onderzoek is eenmalig per dorp. Kosten: 130% van de trainingskosten; maximaal één onderzoek tegelijk.</p>';
+    panel.innerHTML='<hr><h3>📚 Troepenonderzoek</h3><p class="subtle">Infanterie en cavalerie worden eenmalig per dorp onderzocht. Kosten: 130% van de trainingskosten; maximaal één onderzoek tegelijk.</p>';
     $('#modal').appendChild(panel);
     if(state.research.queue){const q=state.research.queue;const def=INFANTRY[q.type];
       panel.insertAdjacentHTML('beforeend',`<div class="pk-unit-card"><b>🔬 Onderzoek bezig: ${def?def.name:q.type}</b><p>Gereed over <strong data-timer-end="${q.end}">${clockTime(q.end-now())}</strong></p><div class="meter"><div data-training-progress="${q.end}" data-training-start="${q.start}" style="width:${Math.max(0,Math.min(100,100*(now()-q.start)/(q.end-q.start)))}%"></div></div></div>`);
@@ -896,9 +954,9 @@ function showBuilding(id){
     Object.entries(INFANTRY).forEach(([type,def])=>{
       const done=!!state.research.done[type],active=state.research.queue?.type===type,requirements=researchRequirements(def),costs=researchCost(def);
       if(done||active)return;
-      const req=`Kazerne ${def.barracks} · Academie ${def.academy}${def.smithy?' · Smederij '+def.smithy:''}`;
+      const req=`${def.cavalry?'Stallen '+def.stables:'Kazerne '+def.barracks} · Academie ${def.academy}${def.smithy?' · Smederij '+def.smithy:''}`;
       const box=document.createElement('div');box.className='pk-unit-card';
-      box.innerHTML=`<div class="pk-unit-title"><img src="${def.icon}" width="28" height="28" alt=""><b>${def.name}</b></div><p class="subtle">Vereisten: ${req}</p><p>${done?'✅ Onderzocht':active?'⏳ Onderzoek bezig':requirements?'🔓 Onderzoek beschikbaar':'🔒 Gebouwen nog niet op niveau'}</p><p>Onderzoekstijd: <b>${clockTime(researchDuration(def.researchMs))}</b> (basis ${clockTime(def.researchMs)})</p><p><b>Eenmalige onderzoekskosten:</b></p>${costHtml(costs)}<button type="button" class="action" ${done||active||!requirements||!!state.research.queue||!!state.army.mountedResearch.queue||!enough(costs)?'disabled':''}>${done?'Onderzocht':active?'Bezig':state.research.queue?'Ander onderzoek bezig':!requirements?'Vereisten ontbreken':!enough(costs)?'Niet genoeg grondstoffen':'Start onderzoek'}</button>`;
+      box.innerHTML=`<div class="pk-unit-title">${unitIconHtml(type)}<b>${def.name}</b></div><p class="subtle">Vereisten: ${req}</p><p>${done?'✅ Onderzocht':active?'⏳ Onderzoek bezig':requirements?'🔓 Onderzoek beschikbaar':'🔒 Gebouwen nog niet op niveau'}</p><p>Onderzoekstijd: <b>${clockTime(researchDuration(def.researchMs))}</b> (basis ${clockTime(def.researchMs)})</p><p><b>Eenmalige onderzoekskosten:</b></p>${costHtml(costs)}<button type="button" class="action" ${done||active||!requirements||!!state.research.queue||!!state.army.mountedResearch.queue||!enough(costs)?'disabled':''}>${done?'Onderzocht':active?'Bezig':state.research.queue?'Ander onderzoek bezig':!requirements?'Vereisten ontbreken':!enough(costs)?'Niet genoeg grondstoffen':'Start onderzoek'}</button>`;
       panel.appendChild(box);
       box.querySelector('button').onclick=()=>{
         update();initResearch();if(state.research.done[type]||state.research.queue||state.army.mountedResearch.queue||!researchRequirements(def)||!enough(costs))return;
@@ -918,7 +976,31 @@ function showBuilding(id){
    const d=HORSE_SCOUT,ready=state.army.mountedResearch.done;
    $('#modal').insertAdjacentHTML('beforeend',`<section class="pk-unit-card"><h3>🐎 Bereden verkenner</h3><p>Beschikbaar: <b>${state.army.mountedScouts}</b> · In training: <b>${state.army.mountedTraining.length}</b></p><p>⚔️ 0 · 🛡️ 15/10 · 🐎 18 hex/u · 📦 50 · 🌾 2/u · zichtstraal 2</p><p>${ready?'Onderzocht':'🔒 Eerst onderzoeken in de academie (niveau 5)'}</p>${state.army.mountedTraining.length?`<p>Volgende gereed over <strong data-timer-end="${state.army.mountedTraining[0]}">${clockTime(state.army.mountedTraining[0]-now())}</strong></p>`:''}<label>Aantal <input id="pk-horse-count" type="number" min="1" max="500" value="1" inputmode="numeric"></label><div id="pk-horse-cost">${costHtml(d.cost)}</div><button class="action" id="pk-horse-train" ${ready?'':'disabled'}>Train bereden verkenners</button></section>`);
    const input=$('#pk-horse-count'),btn=$('#pk-horse-train');const preview=()=>{const n=Number(input.value),valid=Number.isSafeInteger(n)&&n>=1&&n<=500,price=d.cost.map(c=>c*(valid?n:0));$('#pk-horse-cost').innerHTML=costHtml(price);btn.disabled=!ready||!valid||!enough(price);return valid?n:0};
-   input.oninput=preview;btn.onclick=()=>{update();const n=preview(),price=d.cost.map(c=>c*n);if(!n||!state.army.mountedResearch.done||!enough(price))return;RES.forEach((r,i)=>state.stock[r]-=price[i]);let last=Math.max(now(),state.army.mountedTraining.at(-1)||0);for(let i=0;i<n;i++){last+=Math.max(1000,Math.round(d.ms*speedFactor(state.buildings.stables||1)));state.army.mountedTraining.push(last);}save();showBuilding('stables');renderResources()};preview();
+   input.oninput=preview;btn.onclick=()=>{update();const n=preview(),price=d.cost.map(c=>c*n);if(!n||!state.army.mountedResearch.done||!enough(price))return;RES.forEach((r,i)=>state.stock[r]-=price[i]);let last=Math.max(now(),state.army.mountedTraining.at(-1)||0,state.army.cavalryTraining.at(-1)?.end||0);for(let i=0;i<n;i++){last+=Math.max(1000,Math.round(d.ms*speedFactor(state.buildings.stables||1)));state.army.mountedTraining.push(last);}save();showBuilding('stables');renderResources()};preview();
+  }
+  if(id==='stables'&&level>=1){
+    const list=document.createElement('section');list.className='pk-new-infantry';
+    list.innerHTML='<hr><h3>🐎 Cavalerie</h3><p class="subtle">Eerst onderzoeken in de academie. De stallen gebruiken een eigen trainingswachtrij.</p>';
+    $('#modal').appendChild(list);
+    const queue=state.army.cavalryTraining;
+    if(queue.length)list.insertAdjacentHTML('beforeend',`<p>Volgende cavalerie gereed over <strong data-timer-end="${queue[0].end}">${clockTime(queue[0].end-now())}</strong> · ${queue.length} in training</p>`);
+    for(const [type,def] of Object.entries(INFANTRY).filter(([,d])=>d.cavalry)){
+      if(!unitUnlocked(def))continue;
+      const box=document.createElement('div');box.className='pk-unit-card';
+      const duration=Math.max(1000,Math.round(def.ms*speedFactor(level)));
+      box.innerHTML=`<div class="pk-unit-title">${unitIconHtml(type)}<b>${def.name}</b></div><p>In dorp: <b>${state.army.units[type]||0}</b> · In training: <b>${queue.filter(j=>j.type===type).length}</b></p><p class="subtle">⚔️ ${unitEffectiveStat(type,'attack').toFixed(1)} · 🛡️ ${unitEffectiveStat(type,'inf').toFixed(1)}/${unitEffectiveStat(type,'cav').toFixed(1)} · 🐎 ${def.speed} hex/u · 📦 ${def.carry} · 🌾 ${def.upkeep}/u</p><p>Training per eenheid: <b>${clockTime(duration)}</b> (basis ${clockTime(def.ms)})</p><label>Aantal <input type="number" min="1" max="500" value="1" inputmode="numeric"></label><div class="pk-unit-cost"></div><p class="pk-unit-time subtle"></p><button class="action">Train ${def.name.toLowerCase()}</button>`;
+      list.appendChild(box);
+      const input=box.querySelector('input'),costBox=box.querySelector('.pk-unit-cost'),timeBox=box.querySelector('.pk-unit-time'),button=box.querySelector('button');
+      const preview=()=>{const n=Number(input.value),valid=Number.isSafeInteger(n)&&n>=1&&n<=500;const price=def.cost.map(v=>v*(valid?n:0));costBox.innerHTML=costHtml(price);timeBox.textContent=valid?`Laatste gereed over ${clockTime(Math.max(now(),queue.at(-1)?.end||0,state.army.mountedTraining.at(-1)||0)+duration*n-now())}`:'';button.disabled=!valid||!enough(price);return valid?n:0};
+      input.oninput=preview;button.onclick=()=>{
+        update();const n=preview(),price=def.cost.map(v=>v*n);
+        if(!n||!unitUnlocked(def)||!enough(price))return;
+        RES.forEach((r,i)=>state.stock[r]-=price[i]);
+        let end=Math.max(now(),state.army.cavalryTraining.at(-1)?.end||0,state.army.mountedTraining.at(-1)||0);
+        for(let i=0;i<n;i++){end+=Math.max(1000,Math.round(def.ms*speedFactor(state.buildings.stables||1)));state.army.cavalryTraining.push({type,end});}
+        save();showBuilding('stables');renderResources();
+      };preview();
+    }
   }
   if(id==='barracks'&&(state.buildings.barracks||0)>=1){
     const sc=state.army.scout,wait=state.army.training.length;
@@ -952,7 +1034,7 @@ function showBuilding(id){
     list.innerHTML='<hr><h3>⚔️ Overige infanterie</h3><p class="subtle">Eenheden vereisen onderzoek in de academie (behalve de verkenner).</p>';
     $('#modal').appendChild(list);
     list.insertAdjacentHTML('beforeend',trainingQueueHtml());
-    Object.entries(INFANTRY).forEach(([type,def])=>{
+    Object.entries(INFANTRY).filter(([,def])=>!def.cavalry).forEach(([type,def])=>{
       const unlocked=unitUnlocked(def),queued=state.army.unitTraining.filter(x=>x.type===type).length;
       if(!unlocked)return;
       const node=document.createElement('div');node.className='pk-unit-card';
