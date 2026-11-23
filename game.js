@@ -236,7 +236,15 @@ function update(){
   if(state.research.queue&&state.research.queue.end>cursor)boundary=Math.min(boundary,state.research.queue.end);
   if(state.world?.missions?.length){for(const m of state.world.missions)if(m.arrive>cursor)boundary=Math.min(boundary,m.arrive);}
   for(const m of state.army.expeditions){if(m.travel?.nextStepEnd>cursor)boundary=Math.min(boundary,m.travel.nextStepEnd);}
-  if(state.world?.oases)for(const o of Object.values(state.world.oases))if(o.owner==='player'&&(o.unprotectedSince!==null&&o.unprotectedSince!==undefined)&&Object.values(o.garrison||{}).reduce((a,b)=>a+b,0)<2){const deadline=o.unprotectedSince+(1+2*worldHash(o.q,o.r,777))*3600000;if(deadline>cursor)boundary=Math.min(boundary,deadline);}
+  if(state.world?.oases)for(const o of Object.values(state.world.oases)){
+   if(o.owner==='player'&&Number.isFinite(o.unprotectedSince)&&Object.values(o.garrison||{}).reduce((a,b)=>a+b,0)<2){
+    const deadline=o.unprotectedSince+(1+2*worldHash(o.q,o.r,777))*3600000;
+    if(deadline>cursor)boundary=Math.min(boundary,deadline);
+   }else if(!o.owner&&o.cleared&&Number.isFinite(o.clearedAt)){
+    const deadline=o.clearedAt+(1+2*worldHash(o.q,o.r,778))*3600000;
+    if(deadline>cursor)boundary=Math.min(boundary,deadline);
+   }
+  }
   applyResourceInterval(cursor,boundary);advanceOases(cursor,boundary);cursor=boundary;
   advanceExpeditions(cursor);resolveMissions(cursor);
   if(state.queue&&state.queue.end<=cursor){
@@ -445,7 +453,7 @@ function worldTerrain(q,r){
  return {name:'Open vlakte',sprite:[6,1],kind:'plain'};
 }
 
-// v0.12.7 Wilde Oases: persistent world population, missions and military reports.
+// v0.12.8a Wilde Oases: persistent world population, missions and military reports.
 const ANIMALS={
  snake:{name:'Slang',icon:'🐍',atk:45,inf:8,cav:5},wolf:{name:'Wolf',icon:'🐺',atk:22,inf:12,cav:8},hyena:{name:'Hyena',icon:'🐾',atk:32,inf:18,cav:12},eagle:{name:'Adelaar',icon:'🦅',atk:25,inf:12,cav:18},
  boar:{name:'Wild zwijn',icon:'🐗',atk:35,inf:25,cav:15},lion:{name:'Leeuw',icon:'🦁',atk:90,inf:55,cav:35},tiger:{name:'Tijger',icon:'🐅',atk:105,inf:50,cav:40},
@@ -485,7 +493,12 @@ function initOases(){
   }
   state.world.oases={};for(const x of picked)state.world.oases[oasisKey(x.q,x.r)]=makeOasis(x.q,x.r);
  }
- for(const oasis of Object.values(state.world.oases)){if(oasis.animals)for(const id of Object.keys(oasis.animals))oasis.animals[id]=Math.max(0,Math.round(oasis.animals[id]));}
+ for(const oasis of Object.values(state.world.oases)){
+  if(oasis.animals)for(const id of Object.keys(oasis.animals))oasis.animals[id]=Math.max(0,Math.round(oasis.animals[id]));
+  // Old saves did not timestamp cleared, unclaimed oases. Start their grace period
+  // from the installation of this version, never retroactively punish a player.
+  if(oasis.cleared&&!oasis.owner&&!Number.isFinite(oasis.clearedAt))oasis.clearedAt=Date.now();
+ }
  if(!Array.isArray(state.world.reports))state.world.reports=[];
  if(!Array.isArray(state.world.missions))state.world.missions=[];
  if(!state.world.scouted||typeof state.world.scouted!=='object')state.world.scouted={};
@@ -503,6 +516,15 @@ function advanceOases(from,to){
    // Testable deterministic hazard, continuous over time (not one roll per page load).
    const threshold=1+2*worldHash(o.q,o.r,777);
    if(age>=threshold){if(count){const units=Object.fromEntries(Object.entries(o.garrison||{}).filter(([,n])=>n>0));const speed=Math.min(...Object.keys(units).map(id=>INFANTRY[id]?.speed||5));const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/speed*3600000);state.world.missions.push({kind:'return',q:o.q,r:o.r,units,arrive:to+travelMs,travelMs});}o.owner=null;o.cleared=false;o.garrison={};o.unprotectedSince=null;o.animals={...o.original};logReport({kind:'loss',q:o.q,r:o.r,title:'Oase verloren',detail:'Wilde dieren hebben je onbewaakte oase overgenomen. De productiebonus is vervallen.'});}
+  }else if(o.cleared&&!o.owner){
+   // An unclaimed, cleared oasis is not a permanent free claim: wildlife returns
+   // at a stable, seed-derived instant between one and three unattended hours.
+   if(!Number.isFinite(o.clearedAt))o.clearedAt=from;
+   const deadline=o.clearedAt+(1+2*worldHash(o.q,o.r,778))*3600000;
+   if(to>=deadline){
+    o.cleared=false;o.clearedAt=null;o.animals={...o.original};o.wildRecovery={};o.lastWildUpdate=deadline;
+    logReport({kind:'loss',q:o.q,r:o.r,title:'Wilde dieren teruggekeerd',detail:'De vrijgemaakte oase is niet op tijd geclaimd. De oorspronkelijke dierenpopulatie is teruggekeerd; versla de dieren opnieuw om deze oase vrij te maken.'});
+   }
   }else if(!o.cleared&&hours>0){
    for(const id of Object.keys(o.original)){const extra=(o.wildRecovery?.[id]||0)+o.original[id]*.25*hours,whole=Math.floor(extra);o.animals[id]=Math.min(o.original[id],Math.round(o.animals[id]||0)+whole);o.wildRecovery ||= {};o.wildRecovery[id]=extra-whole;}
   }
@@ -518,7 +540,7 @@ function splitLosses(counts,lossRatio,atLeastOne=false){
  const survivors={};for(const e of alloc)survivors[e.id]=e.n-e.dead;
  return survivors;
 }
-function fightOasis(o,attackers){
+function fightOasis(o,attackers,arrivalTime=now()){
  const atk=Object.entries(attackers).reduce((s,[id,n])=>s+unitEffectiveStat(id,'attack')*n,0);
  const cavalryAttack=Object.entries(attackers).reduce((v,[id,n])=>v+(INFANTRY[id]?.cavalry?unitEffectiveStat(id,'attack')*n:0),0);
  const share=atk>0?cavalryAttack/atk:0;
@@ -530,6 +552,7 @@ function fightOasis(o,attackers){
  const priorAnimals=Object.fromEntries(Object.entries(o.animals).map(([id,n])=>[id,Math.ceil(n)]));
  o.animals=winner?Object.fromEntries(Object.keys(o.original).map(id=>[id,0])):survivingAnimals;o.wildRecovery={};
  o.cleared=winner;
+ o.clearedAt=winner?arrivalTime:null;
  logReport({kind:'battle',title:winner?'Overwinning bij oase':'Aanval op oase mislukt',q:o.q,r:o.r,winner,attackers,attackLeft:survivingAttackers,defenders:priorAnimals,defenseLeft:survivingAnimals,attackPower:Math.round(atk),defensePower:Math.round(def)});
  return survivingAttackers;
 }
@@ -547,7 +570,7 @@ function resolveMissions(t){
    }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,arrive:m.arrive+m.travelMs});
   }else if(m.kind==='attack'){
    if(o){
-    const survivors=o.cleared||o.owner==='player'?m.units:fightOasis(o,m.units);
+    const survivors=o.cleared||o.owner==='player'?m.units:fightOasis(o,m.units,m.arrive);
     if(Object.values(survivors).some(n=>n>0))active.push({kind:'return',q:m.q,r:m.r,units:survivors,arrive:m.arrive+m.travelMs});
    }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,arrive:m.arrive+m.travelMs});
   }
@@ -593,7 +616,7 @@ function claimOasis(o){
  const claimed=Object.values(state.world.oases).filter(x=>x.owner==='player').length;
  const level=state.buildings.residence||0,slots=level>=15?3:level>=10?2:level>=5?1:0;
  if(claimed>=slots)return;
- o.owner='player';o.unprotectedSince=now();o.garrison={};save();showWorldTile(o.q,o.r);renderResources();
+ o.owner='player';o.clearedAt=null;o.unprotectedSince=now();o.garrison={};save();showWorldTile(o.q,o.r);renderResources();
 }
 function unitInputRows(ids,prefix,counts){return `<div class="pk-mission-rows">${ids.filter(id=>(counts[id]||0)>0).map(id=>`<label>${unitIconHtml(id)}<span>${INFANTRY[id].name} (${counts[id]})</span><input id="${prefix}-${id}" type="number" min="0" max="${counts[id]}" value="0" inputmode="numeric"></label>`).join('')}</div>`}
 let reportFilter='all';
@@ -763,7 +786,7 @@ function showWorldTile(q,r){
  const slots=(state.buildings.residence||0)>=15?3:(state.buildings.residence||0)>=10?2:(state.buildings.residence||0)>=5?1:0;
  const owned=Object.values(state.world.oases).filter(x=>x.owner==='player').length;
  const g=Object.values(o.garrison||{}).reduce((a,b)=>a+b,0);
- const claim=o.cleared&&!o.owner?`<p>✅ Deze oase is vrijgemaakt. Open de <b>residentie</b> om haar te claimen (niveau 5, 10 of 15).</p>`:'';
+ const claim=o.cleared&&!o.owner?`<p>✅ Deze oase is vrijgemaakt. Open de <b>residentie</b> om haar te claimen (niveau 5, 10 of 15).</p><p class="subtle">⚠️ Zonder eigenaar keren de wilde dieren na 1 tot 3 uur terug. Nog maximaal ${clockTime(Math.max(0,(o.clearedAt||now())+(1+2*worldHash(o.q,o.r,778))*3600000-now()))}.</p>`:'';
  const attack=!o.cleared&&!o.owner?`<h3>⚔️ Aanvallen</h3><p class="subtle">Eenheden reizen met de langzaamste deelnemer. De uitkomst wordt bij aankomst berekend.</p>${unitInputRows(Object.keys(INFANTRY),'pk-send',state.army.units)}<button class="action" id="pk-attack">Stuur aanval</button>`:'';
  const reinforce=o.owner==='player'?`<h3>🛡️ Garnizoen</h3><p>Gestationeerd: ${g} · <b>${oasisStatus(o)}</b>${g<2&&o.unprotectedSince!==null?` · ${clockTime(now()-o.unprotectedSince)} onbewaakt`:''}</p><p class="subtle">Twee soldaten beschermen deze oase volledig tegen wilde dieren.</p>${unitInputRows(Object.keys(INFANTRY),'pk-send',state.army.units)}<button class="action" id="pk-reinforce">Versterking sturen</button><h3>Troepen terugroepen</h3>${unitInputRows(Object.keys(INFANTRY),'pk-recall',o.garrison||{})}<button class="small-btn" id="pk-recall-units">Terugroepen</button>`:'';
  modal(`<h2>🌿 ${safeText(TYPES[o.resource].resource)}oase +${o.bonus*100}%</h2><p>Terrein: ${t.name} · ${q} | ${r}</p><p><b>Status:</b> ${oasisStatus(o)}</p>${!o.cleared&&!o.owner?`<h3>Wilde dieren</h3><p>${animals||'Geen dieren'}</p>`:''}${claim}${attack}${reinforce}`);
