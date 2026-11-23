@@ -1,6 +1,8 @@
 /* Project Kingdom — game rules and data. Visual presentation lives in style.css. */
 'use strict';
 const KEY='project-kingdom-save-v01';
+const PK_APP_VERSION='0.12.9b'; // Onderhoudsupdate: afbeeldingen, back-ups en versiecontrole.
+const PK_VERSION_ENDPOINT='version.json';
 const TYPES={
   wood:{name:'Houthakker',resource:'Hout',icon:'🌲',field:'wood',base:[10,25,25,15]},
   clay:{name:'Kleigroeve',resource:'Klei',icon:'🧱',field:'clay',base:[25,10,25,15]},
@@ -357,7 +359,7 @@ function renderVillage(){
   const plots=VILLAGE_PLOTS.map(p=>{
     const type=state.plots[p.n];
     const art=plotArt(type);
-    return `<button class="village-plot plot-${p.n} ${[1,2,9].includes(p.n)?'village-rear':'village-front'} ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}" alt="" class="building-asset"><span class="level-badge">${state.buildings[type]||'🔨'}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
+    return `<button class="village-plot plot-${p.n} ${[1,2,9].includes(p.n)?'village-rear':'village-front'} ${art?'village-occupied':''}" style="left:${p.x}%;top:${p.y}%" data-plot="${p.n}" aria-label="Bouwplaats ${p.n}${type?', '+BLD[type].name:''}">${art?`<img src="${art}?v=0129b" alt="" class="building-asset" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="pk-building-fallback" hidden>${BLD[type]?.icon||'🏠'}</span><span class="level-badge">${state.buildings[type]||'🔨'}</span>`:`<span class="plot-number">${p.n}</span>`}</button>`;
   }).join('');
   return `<div class="scene-head"><div><h1>De dorpskern</h1></div>${villagePill()}</div>
   <section class="village-layout" aria-label="Illustratie van een dorp met negen bouwplaatsen">
@@ -1111,10 +1113,105 @@ function showBuilding(id){
     });
   }
 }
+// v0.12.9b: the original localStorage save key is deliberately unchanged.
+// A backup contains the entire game state, including expedition and world data.
+function pkValidateSave(candidate){
+  return !!(candidate && typeof candidate==='object' && !Array.isArray(candidate)
+    && candidate.version===1 && candidate.stock && typeof candidate.stock==='object'
+    && RES.every(k=>Number.isFinite(candidate.stock[k]) && candidate.stock[k]>=0)
+    && Array.isArray(candidate.fields) && candidate.fields.length===10
+    && candidate.fields.every(f=>f && TYPES[f.type] && Number.isInteger(f.level) && f.level>=0 && f.level<=20)
+    && candidate.buildings && typeof candidate.buildings==='object'
+    && Number.isInteger(candidate.buildings.main) && candidate.buildings.main>=1
+    && (!candidate.army || typeof candidate.army==='object')
+    && (!candidate.world || typeof candidate.world==='object') );
+}
+function pkBackupFilename(){
+  const d=new Date();const day=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+  return `project-kingdom-${day}-${d.getHours()}${String(d.getMinutes()).padStart(2,'0')}.json`;
+}
+function pkDownloadBackup(){
+  update();save();
+  const snapshot={app:'Project Kingdom',format:'pk-save-export',formatVersion:1,exportedAt:new Date().toISOString(),gameVersion:PK_APP_VERSION,save:state};
+  const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json;charset=utf-8'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=pkBackupFilename();
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  const feedback=document.getElementById('pk-backup-feedback');
+  if(feedback)feedback.textContent='De back-up is aangeboden als download. Controleer in Bestanden of het bestand daadwerkelijk is opgeslagen.';
+}
+async function pkImportBackup(file){
+  const feedback=document.getElementById('pk-backup-feedback');
+  if(!file)return;
+  try{
+    if(file.size>15*1024*1024)throw Error('Bestand is te groot (maximaal 15 MB).');
+    const parsed=JSON.parse(await file.text());
+    if(parsed?.format && parsed.format!=='pk-save-export')throw Error('Dit is geen Project Kingdom-back-up.');
+    const incoming=parsed?.format==='pk-save-export'?parsed.save:parsed;
+    if(!pkValidateSave(incoming))throw Error('De spelstand is niet geldig of hoort bij een niet-ondersteunde versie.');
+    if(!confirm(`Spelstand van ${incoming.villageName||'onbekend dorp'} terugzetten? Hiermee overschrijf je de huidige voortgang op DIT apparaat. Maak eerst een back-up.`))return;
+    const previous=localStorage.getItem(KEY);
+    try{
+      localStorage.setItem(KEY,JSON.stringify(incoming));
+    }catch(err){if(previous!==null)try{localStorage.setItem(KEY,previous)}catch{};throw err;}
+    state=incoming;
+    closeModal();render();alert('Spelstand succesvol geïmporteerd. Je kunt nu verder spelen.');
+  }catch(err){if(feedback)feedback.textContent='Importeren mislukt: '+err.message;else alert('Importeren mislukt: '+err.message);}
+}
+let pkLastVersionCheck=0,pkAvailableVersion=null;
+async function pkCheckVersion(showResult=false){
+  const label=document.getElementById('pk-update-feedback');
+  if(label&&showResult)label.textContent='Controleren op updates…';
+  try{
+    const url=new URL(PK_VERSION_ENDPOINT,location.href);url.searchParams.set('_',String(Date.now()));
+    const res=await fetch(url.toString(),{cache:'no-store'});
+    if(!res.ok)throw Error('Versiebestand niet bereikbaar ('+res.status+').');
+    const data=await res.json();
+    if(!/^\d+\.\d+\.\d+[a-z]?$/.test(data.version||''))throw Error('Ongeldig versiebestand.');
+    // suffix (e.g. b) is part of a release; compare numeric and suffix separately.
+    const v=data.version;
+    const parse=v=>{const m=String(v).match(/^(\d+)\.(\d+)\.(\d+)([a-z]?)$/);return m?[+m[1],+m[2],+m[3],m[4].charCodeAt(0)||0]:[0,0,0,0]};
+    const x=parse(v),y=parse(PK_APP_VERSION);
+    const newer=x.some((n,i)=>n!==y[i]&&x.slice(0,i).every((q,j)=>q===y[j])&&n>y[i]);
+    pkAvailableVersion=newer?v:null;pkLastVersionCheck=Date.now();
+    if(label)label.textContent=newer?`Nieuwe versie ${v} beschikbaar!`:`Je speelt al de nieuwste versie (v${PK_APP_VERSION}).`;
+    const flag=document.getElementById('pk-settings-update-dot');if(flag)flag.hidden=!newer;
+    // Refresh can also be useful when iOS serves stale assets at the same app version.
+    const btn=document.getElementById('pk-load-newest');if(btn)btn.disabled=false;
+    return newer;
+  }catch(err){if(label)label.textContent='Updatecontrole niet gelukt. Controleer je internetverbinding. ('+err.message+')';return false;}
+}
+function pkLoadNewest(){
+  // Only re-fetch the HTML/JS. No localStorage key, clearStorage, or reset is touched.
+  save();
+  const url=new URL(location.href);
+  url.searchParams.set('pk_update',String(Date.now()));
+  location.replace(url.toString());
+}
+function pkShowSettings(){
+  modal(`<h2>⚙️ Spelbeheer</h2><p>Huidige versie: <strong>v${PK_APP_VERSION}</strong></p>
+  <h3>💾 Spelstand veiligstellen</h3><p>Bewaar je hele koninkrijk als JSON-bestand. Je spelstand blijft ook op dit apparaat staan.</p>
+  <button type="button" class="action" id="pk-export-save">Back-up downloaden</button>
+  <p class="subtle">Terugzetten overschrijft de huidige spelstand. Maak dus eerst een back-up.</p>
+  <label for="pk-import-save"><strong>Back-up importeren</strong></label><input id="pk-import-save" type="file" accept=".json,application/json" style="display:block;max-width:100%;margin:8px 0 14px">
+  <p class="subtle" role="status" id="pk-backup-feedback"></p>
+  <h3>🔄 Spel updaten</h3><p class="subtle" role="status" id="pk-update-feedback">Nog niet gecontroleerd.</p>
+  <button type="button" class="small-btn" id="pk-check-update">Controleer op updates</button>
+  <button type="button" class="action" id="pk-load-newest" style="margin-top:10px">Nieuwste versie laden</button>
+  <p class="subtle">Je spelstand wordt niet gewist. Een nieuwe versie wordt vanaf GitHub geladen; offline werkt deze controle niet.</p>`);
+  document.getElementById('pk-export-save').onclick=pkDownloadBackup;
+  document.getElementById('pk-import-save').onchange=e=>pkImportBackup(e.target.files?.[0]);
+  document.getElementById('pk-check-update').onclick=()=>pkCheckVersion(true);
+  document.getElementById('pk-load-newest').onclick=pkLoadNewest;
+  pkCheckVersion(true);
+}
+document.getElementById('pk-settings-btn').onclick=pkShowSettings;
+
 $('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij en academie ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
 document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});
 $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
 document.querySelectorAll('.bottom button').forEach(b=>b.onclick=()=>{if(b.dataset.screen==='messages'){showReports();return;}screen=b.dataset.screen;resourceOpen=null;closeModal();render()});
 render();
 setInterval(render,1000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){render();if(Date.now()-pkLastVersionCheck>5*60*1000)pkCheckVersion(false)}});
+setTimeout(()=>pkCheckVersion(false),2500);
+setInterval(()=>{if(!document.hidden && Date.now()-pkLastVersionCheck>10*60*1000)pkCheckVersion(false)},10*60*1000);
