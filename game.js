@@ -1,7 +1,7 @@
 /* Project Kingdom — game rules and data. Visual presentation lives in style.css. */
 'use strict';
 const KEY='project-kingdom-save-v01';
-const PK_APP_VERSION='0.12.9b'; // Onderhoudsupdate: afbeeldingen, back-ups en versiecontrole.
+const PK_APP_VERSION='0.12.9c'; // Kolonisatie en meerdere dorpen.
 const PK_VERSION_ENDPOINT='version.json';
 const TYPES={
   wood:{name:'Houthakker',resource:'Hout',icon:'🌲',field:'wood',base:[10,25,25,15]},
@@ -29,6 +29,7 @@ const initial=()=>({
   buildings:{main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0,stables:0,residence:0,workshop:0},
   queue:null,
   villageName:'Dorp 1',
+  colonists:{count:0,training:[],usedSlots:0},
   last:now()
 });
 function load(){
@@ -39,10 +40,49 @@ function load(){
   return initial();
 }
 let state=load(),screen='fields',resourceOpen=null;
+// Save-compatible village migration: the original root always holds the active village.
+// Inactive villages are snapshots. The world and reports remain shared.
+const VILLAGE_KEYS=['plots','stock','fields','buildings','queue','villageName','army','research','smithyResearch','colonists','last','economyV127a'];
+const villageSnapshot=()=>Object.fromEntries(VILLAGE_KEYS.map(k=>[k,structuredClone(state[k])]));
+function initVillageSystem(){
+ if(!Number.isInteger(state.activeVillageId))state.activeVillageId=0;
+ if(!Array.isArray(state.otherVillages))state.otherVillages=[];
+ if(!state.colonists||typeof state.colonists!=='object')state.colonists={count:0,training:[],usedSlots:0};
+ if(!Array.isArray(state.colonists.training))state.colonists.training=[];
+ if(!Number.isInteger(state.colonists.count))state.colonists.count=0;
+ if(!Number.isInteger(state.colonists.usedSlots))state.colonists.usedSlots=0;
+ if(!state.villageCoordinates)state.villageCoordinates={q:0,r:0};
+ if(!Array.isArray(state.villageRegistry))state.villageRegistry=[{id:0,q:0,r:0,name:state.villageName||'Dorp 1'}];
+ if(!state.world)state.world={seed:Math.floor(Math.random()*2147483646)+1,discovered:[]};
+ if(!Array.isArray(state.world.colonyMissions))state.world.colonyMissions=[];
+}
+initVillageSystem();
+const villageById=id=>state.villageRegistry.find(v=>v.id===id);
+const activeVillage=()=>villageById(state.activeVillageId)||state.villageRegistry[0];
+const villageAt=(q,r)=>state.villageRegistry.find(v=>v.q===q&&v.r===r);
+function syncVillageName(){const entry=activeVillage();if(entry)entry.name=state.villageName;}
+function switchVillage(id){
+ if(id===state.activeVillageId||!villageById(id))return;
+ update();syncVillageName();
+ state.otherVillages.push({id:state.activeVillageId,...villageSnapshot()});
+ const next=state.otherVillages.find(v=>v.id===id);if(!next)return;
+ state.otherVillages=state.otherVillages.filter(v=>v.id!==id);
+ for(const k of VILLAGE_KEYS)if(k in next)state[k]=structuredClone(next[k]);
+ state.activeVillageId=id;state.villageCoordinates={q:villageById(id).q,r:villageById(id).r};
+ initScouts();initResearch();initSmithyResearch();initVillageSystem();
+ update();save();screen='fields';closeModal();render();
+}
+function showVillageSwitcher(){
+ update();const rows=state.villageRegistry.map(v=>`<button class="action" data-switch-village="${v.id}" ${v.id===state.activeVillageId?'disabled':''}>🏘️ ${safeText(v.name)} (${v.q} | ${v.r})${v.id===state.activeVillageId?' · Huidig dorp':''}</button>`).join('');
+ modal(`<h2>🏰 Mijn dorpen</h2><p>Je dorpen hebben afzonderlijke grondstoffen, gebouwen, legers en onderzoek.</p>${rows}<button class="small-btn" id="pk-rename-current" style="margin-top:12px">✎ Huidig dorp hernoemen</button>`);
+ document.querySelectorAll('[data-switch-village]').forEach(b=>b.onclick=()=>switchVillage(Number(b.dataset.switchVillage)));
+ document.getElementById('pk-rename-current').onclick=showRenameVillage;
+}
+
 if(typeof state.villageName!=='string'||!state.villageName.trim())state.villageName='Dorp 1';
 const villageName=()=>state.villageName||'Dorp 1';
 const safeText=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const villagePill=()=>`<button type="button" class="pill village-name-pill" data-rename-village title="Dorpsnaam wijzigen">${safeText(villageName())} ✎</button>`;
+const villagePill=()=>`<button type="button" class="pill village-name-pill" data-village-switch title="Dorpen beheren">${safeText(villageName())} ▾</button>`;
 if(!state.plots||typeof state.plots!=='object')state.plots={};
 if(!state.buildings)state.buildings={main:1,warehouse:0,granary:0};
 for(const [id,def] of Object.entries({main:1,warehouse:0,granary:0,wall:0,rally:0,barracks:0,market:0,smithy:0,academy:0,stables:0,residence:0,workshop:0})){
@@ -98,6 +138,15 @@ function resolveSmithyResearch(at){
 }
 
 const researchCost=def=>def.cost.map(n=>Math.ceil((n*13-0.000001)/10));
+const COLONIST_COST=[2000,1500,1500,1000];
+const COLONIST_RESEARCH_COST=[4000,4000,3000,2000];
+const COLONY_FOUNDING_COST=[2000,2000,2000,2000];
+const COLONIST_TRAIN_MS=3600000;
+const COLONIST_SPEED=5;
+const colonistPrerequisites=()=> (state.buildings.residence||0)>=10&&(state.buildings.academy||0)>=15&&(state.buildings.main||0)>=15;
+const residenceSlots=()=> (state.buildings.residence||0)>=20?2:(state.buildings.residence||0)>=10?1:0;
+const colonistTrainMs=()=>Math.max(1000,Math.round(COLONIST_TRAIN_MS*speedFactor(state.buildings.residence||1)));
+
 function initResearch(){
  if(!state.research||typeof state.research!=='object')state.research={done:{},queue:null};
  if(!state.research.done||typeof state.research.done!=='object')state.research.done={};
@@ -105,7 +154,7 @@ function initResearch(){
 }
 function resolveResearch(at){
  initResearch();const q=state.research.queue;
- if(q&&q.end<=at){if(INFANTRY[q.type])state.research.done[q.type]=true;state.research.queue=null;}
+ if(q&&q.end<=at){if(INFANTRY[q.type]||q.type==='colonist')state.research.done[q.type]=true;state.research.queue=null;}
 }
 function researchRequirements(def){return (!def.barracks||(state.buildings.barracks||0)>=def.barracks)&&(!def.stables||(state.buildings.stables||0)>=def.stables)&&(state.buildings.academy||0)>=def.academy&&(!def.smithy||(state.buildings.smithy||0)>=def.smithy)&&(!def.workshop||(state.buildings.workshop||0)>=def.workshop)}
 const UNIT_ICON_SCOUT='assets/unit-scout.png';
@@ -117,7 +166,7 @@ function armyTrainingEntries(){return [...state.army.training.map(t=>({end:t,typ
 function lastTrainingEnd(){const list=armyTrainingEntries();return list.length?list[list.length-1].end:0}
 function maxUnitOrder(def){return Math.max(0,Math.min(500,...RES.map((r,i)=>Math.floor((state.stock[r]+0.00000001)/def.cost[i]))))}
 function unitAvailable(type){return type==='scout'?scoutAvailable('scout'):(state.army.units[type]||0)}
-function nextArmyTrainingBoundary(cursor){const ends=[...armyTrainingEntries().map(t=>t.end),...(state.army.mountedTraining||[]),...(state.army.cavalryTraining||[]).map(t=>t.end),...(state.army.siegeTraining||[]).map(t=>t.end),...(state.smithyResearch?.queue||[]).map(t=>t.end),state.army.mountedResearch?.queue?.end].filter(t=>Number.isFinite(t)&&t>cursor);return ends.length?Math.min(...ends):Infinity}
+function nextArmyTrainingBoundary(cursor){const ends=[...armyTrainingEntries().map(t=>t.end),...(state.army.mountedTraining||[]),...(state.army.cavalryTraining||[]).map(t=>t.end),...(state.army.siegeTraining||[]).map(t=>t.end),...(state.smithyResearch?.queue||[]).map(t=>t.end),state.army.mountedResearch?.queue?.end,...(state.colonists?.training||[])].filter(t=>Number.isFinite(t)&&t>cursor);return ends.length?Math.min(...ends):Infinity}
 function unitUnlocked(def){return researchRequirements(def)&&!!state.research.done[Object.keys(INFANTRY).find(id=>INFANTRY[id]===def)]}
 
 function initScouts(){
@@ -154,7 +203,7 @@ function populationForLevel(base,level){let total=0;for(let lv=1;lv<=Math.max(0,
 function buildingPopulation(){return Object.entries(BUILDING_POP).reduce((sum,[id,base])=>{const lv=state.buildings[id]||0;return sum+(!state.economyV127a?(lv>0&&id!=='wall'?base+levelBand(lv):0):populationForLevel(base,lv))},0)}
 function fieldPopulation(){return state.fields.reduce((sum,f)=>sum+(!state.economyV127a?(f.level>0?(FIELD_POP[f.type]||0)+levelBand(f.level):0):populationForLevel(FIELD_POP[f.type]||0,f.level)),0)}
 function population(){return buildingPopulation()+fieldPopulation()}
-function upkeepPerHour(){if(!state.army)return 0;const atHome=Object.entries(INFANTRY).reduce((a,[id,d])=>a+(state.army.units[id]||0)*d.upkeep,0);const stationed=Object.values(state.world?.oases||{}).reduce((s,o)=>s+Object.entries(o.garrison||{}).reduce((a,[id,n])=>a+n*(INFANTRY[id]?.upkeep||0),0),0);const moving=(state.world?.missions||[]).reduce((s,m)=>s+Object.entries(m.units||{}).reduce((a,[id,n])=>a+n*(INFANTRY[id]?.upkeep||0),0),0);return state.army.scouts+state.army.mountedScouts*2+atHome+stationed+moving}
+function upkeepPerHour(){if(!state.army)return 0;const atHome=Object.entries(INFANTRY).reduce((a,[id,d])=>a+(state.army.units[id]||0)*d.upkeep,0);const stationed=Object.values(state.world?.oases||{}).reduce((s,o)=>s+((o.ownerVillage||0)===state.activeVillageId?Object.entries(o.garrison||{}).reduce((a,[id,n])=>a+n*(INFANTRY[id]?.upkeep||0),0):0),0);const moving=(state.world?.missions||[]).reduce((s,m)=>s+((m.originVillage||0)===state.activeVillageId?Object.entries(m.units||{}).reduce((a,[id,n])=>a+n*(INFANTRY[id]?.upkeep||0),0):0),0);return state.army.scouts+state.army.mountedScouts*2+atHome+stationed+moving}
 function cropNet(){return perHour('crop')-population()-upkeepPerHour()}
 
 function maxScoutOrder(){return Math.max(0,Math.min(500,...RES.map((r,i)=>Math.floor((state.stock[r]+0.000001)/SCOUT_COST[i]))))}
@@ -204,6 +253,7 @@ function resolveArmyTraining(time){
  while(state.army.mountedTraining.length&&state.army.mountedTraining[0]<=time){state.army.mountedTraining.shift();state.army.mountedScouts++;}
  while(state.army.cavalryTraining.length&&state.army.cavalryTraining[0].end<=time){const item=state.army.cavalryTraining.shift();state.army.units[item.type]=(state.army.units[item.type]||0)+1;}
  while(state.army.siegeTraining.length&&state.army.siegeTraining[0].end<=time){const item=state.army.siegeTraining.shift();state.army.units[item.type]=(state.army.units[item.type]||0)+1;}
+ if(state.colonists){while(state.colonists.training.length&&state.colonists.training[0]<=time){state.colonists.training.shift();state.colonists.count++;}}
  const research=state.army.mountedResearch;if(research.queue&&research.queue.end<=time){research.queue=null;research.done=true;}
 }
 function expeditionStepMs(type){return Math.round(3600000/SCOUT_TYPES[type].speed)}
@@ -225,8 +275,8 @@ function advanceExpeditions(time){
     if(m.type==='horse')state.army.mountedScouts=Math.max(0,state.army.mountedScouts-lost);
     else state.army.scouts=Math.max(0,state.army.scouts-lost);
     if(m.count===0){logReport({kind:'loss',title:'Verkenners vermist',q:m.target.q,r:m.target.r,detail:`Alle verkenners van deze expeditie zijn omgekomen. Geen informatie ontvangen.`});tr=null;break;}
-    const route=scoutRoute(m.q,m.r,0,0,true)||[],ms=expeditionStepMs(m.type);
-    tr={q:0,r:0,start:tr.end,end:tr.end+route.length*ms,nextStepEnd:tr.end+ms,route,returning:true};m.travel=tr;
+    const origin=villageById(m.originVillage??0)||{q:0,r:0},route=scoutRoute(m.q,m.r,origin.q,origin.r,true)||[],ms=expeditionStepMs(m.type);
+    tr={q:origin.q,r:origin.r,start:tr.end,end:tr.end+route.length*ms,nextStepEnd:tr.end+ms,route,returning:true};m.travel=tr;
     if(!route.length){tr.nextStepEnd=tr.end;}
    }else{
     const o=oasisByCoord(m.target.q,m.target.r);
@@ -241,6 +291,30 @@ function advanceExpeditions(time){
 }
 const availableCap=r=>storageCap(state.buildings[r==='crop'?'granary':'warehouse']||0);
 function perHour(r){const base=25+state.fields.filter(f=>f.type===r).reduce((n,f)=>n+(YIELD[f.level]||Math.round(405*Math.pow(1.5,f.level-10))),0);return base*(1+oasisBonus(r))}
+// Advance idle settlements without advancing global wildlife a second time.
+function tickInactiveVillages(t){
+ const keys=VILLAGE_KEYS,active=villageSnapshot(),originalId=state.activeVillageId;
+ for(const v of state.otherVillages){
+  for(const k of keys)if(k in v)state[k]=structuredClone(v[k]);
+  state.activeVillageId=v.id;initVillageSystem();initScouts();initResearch();initSmithyResearch();
+  let start=Math.min(t,state.last||t),safety=0;
+  while(start<t&&safety++<10000){
+   let end=t;
+   if(state.queue?.end>start)end=Math.min(end,state.queue.end);
+   end=Math.min(end,nextArmyTrainingBoundary(start));
+   for(const m of state.army.expeditions||[])if(m.travel?.nextStepEnd>start)end=Math.min(end,m.travel.nextStepEnd);
+   if(state.research.queue?.end>start)end=Math.min(end,state.research.queue.end);
+   if(!Number.isFinite(end)||end<=start)break;
+   applyResourceInterval(start,end);start=end;
+   if(state.queue?.end<=end){const q=state.queue;if(q.kind==='field')state.fields[q.id].level++;else if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;state.queue=null;}
+   resolveArmyTraining(end);resolveResearch(end);resolveSmithyResearch(end);advanceExpeditions(end);
+  }
+  advanceExpeditions(t);resolveArmyTraining(t);resolveResearch(t);resolveSmithyResearch(t);
+  state.last=t;state.economyV127a=true;
+  for(const k of keys)v[k]=structuredClone(state[k]);
+ }
+ for(const k of keys)state[k]=active[k];state.activeVillageId=originalId;
+}
 function update(){
  const t=now();initWorld();initScouts();initResearch();initOases();
  initSmithyResearch();
@@ -262,7 +336,7 @@ function update(){
     if(deadline>cursor)boundary=Math.min(boundary,deadline);
    }
   }
-  applyResourceInterval(cursor,boundary);advanceOases(cursor,boundary);cursor=boundary;
+  applyResourceInterval(cursor,boundary);if(!Number.isFinite(state.world.lastWorldTick))state.world.lastWorldTick=cursor;if(boundary>state.world.lastWorldTick){advanceOases(state.world.lastWorldTick,boundary);state.world.lastWorldTick=boundary;}cursor=boundary;
   advanceExpeditions(cursor);resolveMissions(cursor);
   if(state.queue&&state.queue.end<=cursor){
    const q=state.queue;
@@ -275,10 +349,10 @@ function update(){
  // Legacy saves may have timers ending before their saved last-update timestamp.
  if(state.queue&&state.queue.end<=t){const q=state.queue;if(q.kind==='field')state.fields[q.id].level++;if(q.kind==='building')state.buildings[q.id]=(state.buildings[q.id]||0)+1;state.queue=null;}
  resolveArmyTraining(t);resolveResearch(t);advanceExpeditions(t);resolveMissions(t);
- state.last=t;state.economyV127a=true;save();
+ state.last=t;state.economyV127a=true;resolveColonies(t);tickInactiveVillages(t);save();
 }
 
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch{}}
+function save(){try{syncVillageName();localStorage.setItem(KEY,JSON.stringify(state))}catch{}}
 function price(type,level){return TYPES[type].base.map(x=>Math.ceil(x*Math.pow(1.3,level)))}
 const BLD={
   main:{name:'Hoofdgebouw',icon:'🏛️',base:[65,70,50,35]},
@@ -331,9 +405,9 @@ const LAND_PLOTS=[
 function renderFields(){
   const spots=LAND_PLOTS.map(pos=>{
     const f=state.fields[pos.id],busy=state.queue?.kind==='field'&&state.queue.id===f.id;
-    return `<button type="button" class="land-hotspot ${busy?'land-busy':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} ${f.id+1}, niveau ${f.level}"><span class="land-level">${busy?'🔨 ':''}${f.level}</span></button>`;
+    return `<button type="button" class="land-hotspot ${busy?'land-busy':''}" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%" data-field="${f.id}" aria-label="${TYPES[f.type].name} ${f.id+1}, niveau ${f.level}"><span class="land-level">${busy?'🔨 ':''}${ICON[f.type]} ${f.level}</span></button>`;
   }).join('');
-  return `<div class="scene-head"><div><h1>De landerijen</h1></div>${villagePill()}</div><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Doorlopend landschap met twee houthakkers, twee mijnen, twee kleigroeven, vier graanvelden en een dorp met brug" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section>`;
+  return `<div class="scene-head"><div><h1>De landerijen</h1></div>${villagePill()}</div><p class="note" style="margin:4px 12px 10px">Grondstofvelden: 🪵 ${state.fields.filter(f=>f.type==='wood').length} · 🧱 ${state.fields.filter(f=>f.type==='clay').length} · ⛏️ ${state.fields.filter(f=>f.type==='iron').length} · 🌾 ${state.fields.filter(f=>f.type==='crop').length}</p><section class="landscape-scene" aria-label="Geïllustreerde landerijen met tien interactieve grondstofvelden"><img class="landscape-art" src="assets/landerijen-v040.webp" alt="Geïllustreerd landschap met aanklikbare grondstofvelden; aantallen worden erboven weergegeven" draggable="false">${spots}<button type="button" class="land-village" data-open-village aria-label="Ga naar de dorpskern"><span>🏰 Dorp</span></button></section>`;
 }
 
 const VILLAGE_PLOTS=[
@@ -457,7 +531,7 @@ function initWorld(){
  save();
 }
 function worldTerrain(q,r){
- if(q===0&&r===0)return {name:villageName(),sprite:[1,1],kind:'village'};
+ const village=villageAt(q,r);if(village)return {name:village.name,sprite:[1,1],kind:'village'};
  const n=worldHash(q,r);
  if(n<.09)return {name:'Water',sprite:[6,0],kind:'water'};
  if(n<.17)return {name:'Heuvels',sprite:[3,0],kind:'hills'};
@@ -470,6 +544,50 @@ function worldTerrain(q,r){
  return {name:'Open vlakte',sprite:[6,1],kind:'plain'};
 }
 
+// Stable field distribution, decided at world generation, revealed on scouting.
+function fieldDistribution(q,r){
+ const t=worldTerrain(q,r),n=worldHash(q,r,611),roll=worldHash(q,r,612);
+ if(n<.10)return [1,1,1,7]; // approximately 10% exceptional grain villages
+ const options={forest:[[4,2,1,3],[3,2,2,3],[2,2,2,4]],mountain:[[1,2,4,3],[2,1,4,3],[2,2,2,4]],hills:[[1,2,4,3],[2,2,3,3],[2,2,2,4]],swamp:[[2,4,1,3],[2,3,2,3],[2,2,2,4]],field:[[2,2,2,4],[1,2,1,6],[2,1,2,5]],plain:[[2,2,2,4],[1,2,1,6],[2,2,1,5]]};
+ const list=options[t.kind]||[[2,2,2,4]];return list[Math.min(list.length-1,Math.floor(roll*list.length))];
+}
+const fieldDistributionHtml=a=>`<div class="cost-grid"><div class="cost">🪵<br><b>${a[0]}</b></div><div class="cost">🧱<br><b>${a[1]}</b></div><div class="cost">⛏️<br><b>${a[2]}</b></div><div class="cost">🌾<br><b>${a[3]}</b></div></div>`;
+function canFoundAt(q,r){
+ if(!state.world.discovered.includes(oasisKey(q,r)))return false;
+ const t=worldTerrain(q,r);
+ if(t.kind==='water'||t.kind==='village'||oasisByCoord(q,r))return false;
+ return state.villageRegistry.every(v=>hexDistance(q,r,v.q,v.r)>=2); 
+}
+function foundNewVillage(q,r){
+ update();if(!canFoundAt(q,r)||!state.research.done.colonist||state.colonists.count<3||state.colonists.usedSlots>=residenceSlots()||!enough(COLONY_FOUNDING_COST))return;
+ const origin=activeVillage(),travelMs=Math.max(1,hexDistance(origin.q,origin.r,q,r))*3600000/COLONIST_SPEED;
+ if(!confirm(`Drie kolonisten vanuit ${origin.name} naar ${q} | ${r} sturen? Stichtingskosten: 2.000 van elke grondstof. De kosten en kolonisten worden direct afgeschreven.`))return;
+ RES.forEach((r,i)=>state.stock[r]-=COLONY_FOUNDING_COST[i]);state.colonists.count-=3;state.colonists.usedSlots++;
+ state.world.colonyMissions.push({q,r,originVillage:state.activeVillageId,start:now(),arrive:now()+travelMs});
+ save();closeModal();render();
+}
+function resolveColonies(t){
+ const pending=[];
+ for(const m of state.world.colonyMissions||[]){
+  if(m.arrive>t){pending.push(m);continue;}
+  // No new village may overwrite a village established while the expedition traveled.
+  if(!canFoundAt(m.q,m.r)){
+   const source=m.originVillage===state.activeVillageId?state.colonists:state.otherVillages.find(v=>v.id===m.originVillage)?.colonists;
+   if(source)source.usedSlots=Math.max(0,(source.usedSlots||0)-1);
+   logReport({kind:'other',title:'Kolonisatie mislukt',q:m.q,r:m.r,detail:'De gekozen locatie is niet langer geschikt. De kolonisten en stichtingskosten zijn verloren; de kolonisatieplaats is vrijgegeven.'});continue;
+  }
+  const id=Math.max(...state.villageRegistry.map(v=>v.id))+1;
+  const fresh=initial(),distribution=fieldDistribution(m.q,m.r),types=['wood','clay','iron','crop'];
+  fresh.fields=distribution.flatMap((count,i)=>Array.from({length:count},()=>({type:types[i],level:0}))).map((f,i)=>({...f,id:i}));
+  fresh.villageName=`Dorp ${id+1}`;fresh.army={scouts:0,training:[],scout:{q:m.q,r:m.r,travel:null}};
+  fresh.research={done:{},queue:null};fresh.smithyResearch={levels:{},queue:[]};fresh.economyV127a=true;fresh.last=m.arrive;
+  state.otherVillages.push({id,...Object.fromEntries(VILLAGE_KEYS.map(k=>[k,structuredClone(fresh[k])]))});
+  state.villageRegistry.push({id,q:m.q,r:m.r,name:fresh.villageName});
+  revealScoutHex(m.q,m.r,1);
+  logReport({kind:'other',title:`Nieuw dorp gesticht: ${fresh.villageName}`,q:m.q,r:m.r,detail:`De kolonisten hebben ${fresh.villageName} gesticht. Het dorp begint met 200 van elke grondstof en opslagcapaciteit 600.`});
+ }
+ state.world.colonyMissions=pending;
+}
 // v0.12.8a Wilde Oases: persistent world population, missions and military reports.
 const ANIMALS={
  snake:{name:'Slang',icon:'🐍',atk:45,inf:8,cav:5},wolf:{name:'Wolf',icon:'🐺',atk:22,inf:12,cav:8},hyena:{name:'Hyena',icon:'🐾',atk:32,inf:18,cav:12},eagle:{name:'Adelaar',icon:'🦅',atk:25,inf:12,cav:18},
@@ -521,7 +639,7 @@ function initOases(){
  if(!state.world.scouted||typeof state.world.scouted!=='object')state.world.scouted={};
 }
 function logReport(report){state.world.reports.unshift({id:`${Date.now()}-${Math.random().toString(36).slice(2,6)}`,time:Date.now(),read:false,...report});state.world.reports=state.world.reports.slice(0,100)}
-const oasisBonus=r=>Object.values(state.world?.oases||{}).reduce((sum,o)=>sum+(o.owner==='player'&&o.resource===r?o.bonus:0),0);
+const oasisBonus=r=>Object.values(state.world?.oases||{}).reduce((sum,o)=>sum+(o.owner==='player'&&(o.ownerVillage||0)===state.activeVillageId&&o.resource===r?o.bonus:0),0);
 function advanceOases(from,to){
  const hours=Math.max(0,(to-from)/3600000);
  for(const o of Object.values(state.world.oases||{})){
@@ -532,7 +650,7 @@ function advanceOases(from,to){
    const age=Math.max(0,(to-o.unprotectedSince)/3600000);
    // Testable deterministic hazard, continuous over time (not one roll per page load).
    const threshold=1+2*worldHash(o.q,o.r,777);
-   if(age>=threshold){if(count){const units=Object.fromEntries(Object.entries(o.garrison||{}).filter(([,n])=>n>0));const speed=Math.min(...Object.keys(units).map(id=>INFANTRY[id]?.speed||5));const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/speed*3600000);state.world.missions.push({kind:'return',q:o.q,r:o.r,units,arrive:to+travelMs,travelMs});}o.owner=null;o.cleared=false;o.garrison={};o.unprotectedSince=null;o.animals={...o.original};logReport({kind:'loss',q:o.q,r:o.r,title:'Oase verloren',detail:'Wilde dieren hebben je onbewaakte oase overgenomen. De productiebonus is vervallen.'});}
+   if(age>=threshold){if(count){const units=Object.fromEntries(Object.entries(o.garrison||{}).filter(([,n])=>n>0));const speed=Math.min(...Object.keys(units).map(id=>INFANTRY[id]?.speed||5));const origin=villageById(o.ownerVillage??0)||{q:0,r:0};const travelMs=Math.ceil(hexDistance(origin.q,origin.r,o.q,o.r)/speed*3600000);state.world.missions.push({kind:'return',q:o.q,r:o.r,units,originVillage:o.ownerVillage??0,arrive:to+travelMs,travelMs});}o.owner=null;o.cleared=false;o.garrison={};o.unprotectedSince=null;o.animals={...o.original};logReport({kind:'loss',q:o.q,r:o.r,title:'Oase verloren',detail:'Wilde dieren hebben je onbewaakte oase overgenomen. De productiebonus is vervallen.'});}
   }else if(o.cleared&&!o.owner){
    // An unclaimed, cleared oasis is not a permanent free claim: wildlife returns
    // at a stable, seed-derived instant between one and three unattended hours.
@@ -579,17 +697,21 @@ function resolveMissions(t){
   if(m.arrive>t){active.push(m);continue;}
   const o=oasisByCoord(m.q,m.r);
   if(m.kind==='return'){
-   for(const [id,n] of Object.entries(m.units))state.army.units[id]=(state.army.units[id]||0)+n;
+   const target=m.originVillage??0,army=target===state.activeVillageId?state.army:state.otherVillages.find(v=>v.id===target)?.army;
+   if(army){army.units ||= {};for(const [id,n] of Object.entries(m.units))army.units[id]=(army.units[id]||0)+n;}
   }else if(m.kind==='reinforce'){
-   if(o?.owner==='player'){
+   if(o?.owner==='player'&&(o.ownerVillage||0)===(m.originVillage??0)){
     o.garrison ||= {};for(const [id,n] of Object.entries(m.units))o.garrison[id]=(o.garrison[id]||0)+n;
     if(Object.values(o.garrison).reduce((a,b)=>a+b,0)>=2)o.unprotectedSince=null;
-   }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,arrive:m.arrive+m.travelMs});
+   }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,originVillage:m.originVillage??0,arrive:m.arrive+m.travelMs});
   }else if(m.kind==='attack'){
    if(o){
+    const from=m.originVillage??0,homeSmithy=state.smithyResearch,foreign=from===state.activeVillageId?null:state.otherVillages.find(v=>v.id===from);
+    if(foreign?.smithyResearch)state.smithyResearch=foreign.smithyResearch;
     const survivors=o.cleared||o.owner==='player'?m.units:fightOasis(o,m.units,m.arrive);
-    if(Object.values(survivors).some(n=>n>0))active.push({kind:'return',q:m.q,r:m.r,units:survivors,arrive:m.arrive+m.travelMs});
-   }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,arrive:m.arrive+m.travelMs});
+    state.smithyResearch=homeSmithy;
+    if(Object.values(survivors).some(n=>n>0))active.push({kind:'return',q:m.q,r:m.r,units:survivors,originVillage:m.originVillage??0,arrive:m.arrive+m.travelMs});
+   }else active.push({kind:'return',q:m.q,r:m.r,units:m.units,originVillage:m.originVillage??0,arrive:m.arrive+m.travelMs});
   }
  }
  state.world.missions=active;
@@ -599,7 +721,7 @@ function oasisStatus(o){
  return Object.values(o.garrison||{}).reduce((a,b)=>a+b,0)>=2?'Beschermd':'Onbewaakt';
 }
 function sendOasisMission(o,kind){
- update();if(!o||kind==='attack'&&(o.owner||o.cleared)||kind==='reinforce'&&o.owner!=='player')return;
+ update();if(!o||kind==='attack'&&(o.owner||o.cleared)||kind==='reinforce'&&(o.owner!=='player'||(o.ownerVillage||0)!==state.activeVillageId))return;
  const units={};
  for(const id of Object.keys(INFANTRY).filter(id=>!INFANTRY[id].siege)){
   const input=document.getElementById(`pk-send-${id}`),n=Number(input?.value||0);
@@ -608,13 +730,13 @@ function sendOasisMission(o,kind){
  }
  if(!Object.keys(units).length){alert('Selecteer eerst ten minste één soldaat.');return;}
  const slowest=Math.min(...Object.keys(units).map(id=>INFANTRY[id].speed));
- const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/slowest*3600000);
+ const travelMs=Math.ceil(hexDistance(activeVillage().q,activeVillage().r,o.q,o.r)/slowest*3600000);
  for(const [id,n] of Object.entries(units))state.army.units[id]-=n;
- state.world.missions.push({kind,q:o.q,r:o.r,units,arrive:now()+travelMs,travelMs});
+ state.world.missions.push({kind,q:o.q,r:o.r,units,originVillage:state.activeVillageId,arrive:now()+travelMs,travelMs});
  save();closeModal();render();
 }
 function sendOasisReinforcementHome(o){
- update();if(o?.owner!=='player')return;
+ update();if(o?.owner!=='player'||(o.ownerVillage||0)!==state.activeVillageId)return;
  const g=o.garrison||{};const units={};
  for(const id of Object.keys(INFANTRY)){
   const n=Number(document.getElementById(`pk-recall-${id}`)?.value||0);
@@ -624,16 +746,16 @@ function sendOasisReinforcementHome(o){
  if(!Object.keys(units).length)return;
  for(const [id,n] of Object.entries(units))g[id]-=n;
  if(Object.values(g).reduce((a,b)=>a+b,0)<2)o.unprotectedSince=now();
- const travelMs=Math.ceil(hexDistance(0,0,o.q,o.r)/Math.min(...Object.keys(units).map(id=>INFANTRY[id].speed))*3600000);
- state.world.missions.push({kind:'return',q:o.q,r:o.r,units,arrive:now()+travelMs,travelMs});
+ const travelMs=Math.ceil(hexDistance(activeVillage().q,activeVillage().r,o.q,o.r)/Math.min(...Object.keys(units).map(id=>INFANTRY[id].speed))*3600000);
+ state.world.missions.push({kind:'return',q:o.q,r:o.r,units,originVillage:state.activeVillageId,arrive:now()+travelMs,travelMs});
  save();closeModal();render();
 }
 function claimOasis(o){
  update();if(!o||o.owner||!o.cleared||!state.world.discovered.includes(oasisKey(o.q,o.r)))return;
- const claimed=Object.values(state.world.oases).filter(x=>x.owner==='player').length;
+ const claimed=Object.values(state.world.oases).filter(x=>x.owner==='player'&&(x.ownerVillage||0)===state.activeVillageId).length;
  const level=state.buildings.residence||0,slots=level>=15?3:level>=10?2:level>=5?1:0;
  if(claimed>=slots)return;
- o.owner='player';o.clearedAt=null;o.unprotectedSince=now();o.garrison={};save();showWorldTile(o.q,o.r);renderResources();
+ o.owner='player';o.ownerVillage=state.activeVillageId;o.clearedAt=null;o.unprotectedSince=now();o.garrison={};save();showWorldTile(o.q,o.r);renderResources();
 }
 function unitInputRows(ids,prefix,counts){return `<div class="pk-mission-rows">${ids.filter(id=>(counts[id]||0)>0).map(id=>`<label>${unitIconHtml(id)}<span>${INFANTRY[id].name} (${counts[id]})</span><input id="${prefix}-${id}" type="number" min="0" max="${counts[id]}" value="0" inputmode="numeric"></label>`).join('')}</div>`}
 let reportFilter='all';
@@ -662,11 +784,11 @@ function showReport(index){
 }
 function renderMap(){
  initWorld();
- return `<div class="scene-head"><div><h1>De wereld</h1><p>Ontdek je eigen koninkrijk</p></div><span class="pill" id="worldCounter">${state.world.discovered.length} ontdekt</span></div>
+ return `<div class="scene-head"><div><h1>De wereld</h1><p>Ontdek je eigen koninkrijk</p></div>${villagePill()}<span class="pill" id="worldCounter">${state.world.discovered.length} ontdekt</span></div>
   <div class="world-map-shell"><canvas id="kingdomWorld" aria-label="Hexagonwereldkaart"></canvas>
   <div class="map-controls"><button type="button" data-world-zoom="in" aria-label="Inzoomen">＋</button><button type="button" data-world-zoom="out" aria-label="Uitzoomen">−</button><button type="button" data-world-zoom="home" aria-label="Centreer op eigen dorp">⌂</button></div></div>
   <p class="note" id="scoutStatus">Tik op een ontdekt vakje of de rand van de mist om je verkenner automatisch een route te laten lopen.</p>
-  <button type="button" class="pk-map-reports" id="pk-map-reports">📜 Berichten en rapporten</button><p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
+  ${(state.world.colonyMissions||[]).length?`<p class="note">🏡 Kolonisten onderweg: ${state.world.colonyMissions.map(m=>`${m.q} | ${m.r} (nog ${clockTime(m.arrive-now())})`).join(', ')}</p>`:''}<button type="button" class="pk-map-reports" id="pk-map-reports">📜 Berichten en rapporten</button><p class="world-credit">Kaarttegels: The Clover Patch, Fantasy Hex Tiles (CC BY 4.0).</p>`;
 }
 let mapRedraw=null;
 function setupWorld(){
@@ -699,9 +821,10 @@ function setupWorld(){
       ctx.textAlign='center';ctx.font='21px system-ui';ctx.fillStyle='#fff7db';ctx.fillText(oasis.resource==='wood'?'🌲':oasis.resource==='crop'?'🌾':oasis.resource==='clay'?'🧱':'⛏️',x,y+2);
       if(oasis.bonus===.5){ctx.font='bold 13px system-ui';ctx.fillStyle='#ffdc68';ctx.fillText('★',x+16,y-21);}
     }
-    if(visible&&q===0&&r===0&&mapSelection?.q===0&&mapSelection?.r===0){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText(villageName(),x,y+33)}
+    if(visible&&villageAt(q,r)){ctx.fillStyle='#f1d595';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText(villageAt(q,r).name,x,y+33)}
     if(mapSelection&&mapSelection.q===q&&mapSelection.r===r){ctx.beginPath();ctx.ellipse(x,y,29,27,0,0,Math.PI*2);ctx.strokeStyle='#ffe7aa';ctx.lineWidth=2.5;ctx.stroke()}
   }
+  for(const m of state.world.colonyMissions||[]){const spot=at(m.q,m.r);ctx.font='20px system-ui';ctx.textAlign='center';ctx.fillStyle='#f8dba2';ctx.fillText('🏡',spot.x,spot.y-10);}
   for(const m of state.army.expeditions){
    if(!m.travel)continue;
    const spot=at(m.q,m.r);
@@ -728,7 +851,7 @@ function setupWorld(){
   }if(pointers.size<2)pinch=null;});
  canvas.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);pinch=null});
  canvas.addEventListener('wheel',e=>{e.preventDefault();mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(e.deltaY>0?.9:1.1)));draw()},{passive:false});
- wrap.querySelectorAll('[data-world-zoom]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.worldZoom==='home'){mapCamera={x:0,y:0,zoom:1}}else{mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(b.dataset.worldZoom==='in'?1.2:1/1.2)))}draw()}));
+ wrap.querySelectorAll('[data-world-zoom]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.worldZoom==='home'){const v=activeVillage();mapCamera={x:-v.q*stepX,y:-(v.r*stepY+(v.q%2!==0?stepY/2:0)),zoom:1}}else{mapCamera.zoom=Math.max(.65,Math.min(2.7,mapCamera.zoom*(b.dataset.worldZoom==='in'?1.2:1/1.2)))}draw()}));
 }
 function adjacent(q,r,a,b){let dq=q-a,dr=r-b;return (dq===0&&Math.abs(dr)===1)||(Math.abs(dq)===1&&(dr===0||dr===(a%2!==0?1:-1)));}
 function hexDistance(q,r,toQ=0,toR=0){
@@ -779,33 +902,33 @@ function dispatchScout(q,r){
  update();const type=document.getElementById('pk-scout-type')?.value||'scout',available=scoutAvailable(type);
  const n=Number(document.getElementById('pk-scout-count')?.value||1);
  if(!SCOUT_TYPES[type]||!Number.isSafeInteger(n)||n<1||n>available)return;
- const path=scoutRoute(0,0,q,r,!state.world.discovered.includes(`${q},${r}`));
+ const origin=activeVillage(),path=scoutRoute(origin.q,origin.r,q,r,!state.world.discovered.includes(`${q},${r}`));
  if(!path?.length){alert('Er is nog geen route beschikbaar. Ontdek eerst de aangrenzende hexagons.');return;}
  const ms=expeditionStepMs(type),t=now();
- state.army.expeditions.push({id:`${t}-${Math.random().toString(36).slice(2,7)}`,type,count:n,lost:0,q:0,r:0,target:{q,r},travel:{q,r,start:t,end:t+path.length*ms,nextStepEnd:t+ms,route:path,returning:false}});
+ state.army.expeditions.push({id:`${t}-${Math.random().toString(36).slice(2,7)}`,type,count:n,lost:0,q:origin.q,r:origin.r,originVillage:state.activeVillageId,target:{q,r},travel:{q,r,start:t,end:t+path.length*ms,nextStepEnd:t+ms,route:path,returning:false}});
  save();closeModal();render();
 }
 function showWorldTile(q,r){
  update();const known=state.world.discovered.includes(oasisKey(q,r));
- const path=scoutRoute(0,0,q,r,!known);
+ const start=activeVillage(),path=scoutRoute(start.q,start.r,q,r,!known);
  const can=!!path?.length&&(scoutAvailable('scout')>0||scoutAvailable('horse')>0);
  const choices=[['scout',scoutAvailable('scout')],['horse',scoutAvailable('horse')]].filter(([,n])=>n>0);
  const expedition=can?`<div class="pk-mission-box"><label>Soort verkenner <select id="pk-scout-type">${choices.map(([id,n])=>`<option value="${id}">${SCOUT_TYPES[id].name} (${n})</option>`).join('')}</select></label><label>Aantal verkenners <input type="number" id="pk-scout-count" value="1" min="1" max="${Math.max(...choices.map(c=>c[1]))}"></label><p class="subtle" id="pk-scout-eta">Reistijd heen: ${clockTime(path.length*expeditionStepMs(choices[0][0]))}</p><button class="action" id="sendScout">🥾 Verken · ${path.length} velden</button></div>`:'';
  const bindScout=()=>{if(!can)return;const button=$('#sendScout'),sel=$('#pk-scout-type'),input=$('#pk-scout-count'),eta=$('#pk-scout-eta');if(button)button.onclick=()=>dispatchScout(q,r);if(sel)sel.onchange=()=>{const available=scoutAvailable(sel.value);input.max=available;input.value=Math.min(Number(input.value)||1,available);eta.textContent=`Reistijd heen: ${clockTime(path.length*expeditionStepMs(sel.value))}`;};};
  if(!known){modal(`<h2>🌫️ Onbekend gebied</h2><p>Dit terrein is nog niet verkend.</p><p class="subtle">${can?'Verkenners keren automatisch terug. Je ontvangt pas na terugkomst een rapport.':'Ontdek eerst de aangrenzende hexagons, of wacht tot je verkenners terug zijn.'}</p>${expedition}`);bindScout();return;}
  const t=worldTerrain(q,r),o=oasisByCoord(q,r),scouted=state.world.scouted[oasisKey(q,r)];
- if(t.kind==='village'){modal(`<h2>🏰 ${safeText(villageName())}</h2><p>Je eigen nederzetting.</p><div class="stats"><div class="stat">Coördinaten<b>0 | 0</b></div><div class="stat">Bevolking<b>${fmt(population())}</b></div></div>${expedition}`);bindScout();return;}
- if(!o){modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><p>Coördinaten: ${q} | ${r}</p>${expedition}`);bindScout();return;}
+ if(t.kind==='village'){const v=villageAt(q,r);modal(`<h2>🏰 ${safeText(v.name)}</h2><p>Je eigen nederzetting (${q} | ${r}).</p><button class="action" id="pk-open-map-village" ${v.id===state.activeVillageId?'disabled':''}>Naar dit dorp</button>`);const btn=$('#pk-open-map-village');if(btn)btn.onclick=()=>switchVillage(v.id);return;}
+ if(!o){const fields=fieldDistribution(q,r),eligible=canFoundAt(q,r),slots=residenceSlots()>state.colonists.usedSlots,ready=eligible&&slots&&state.research.done.colonist&&state.colonists.count>=3&&enough(COLONY_FOUNDING_COST);modal(`<h2>${t.name}</h2><p>Terrein: ${t.name.toLowerCase()}</p><p>Coördinaten: ${q} | ${r}</p><h3>🏡 Grondstofverdeling voor een nieuw dorp</h3>${fieldDistributionHtml(fields)}<p class="subtle">${eligible?'Geschikte dorpslocatie':'Niet geschikt: water, oase, bestaand dorp of minder dan 2 hexagonstappen afstand.'}</p><p>Stichtingskosten: 2.000 per grondstof, naast drie kolonisten.</p>${costHtml(COLONY_FOUNDING_COST)}<button class="action" id="pk-found-village" ${ready?'':'disabled'}>${ready?'🏘️ Nieuw dorp stichten':!eligible?'Niet geschikt':!slots?'Geen vrije kolonisatieplaats':!state.research.done.colonist?'Kolonisten nog niet onderzocht':state.colonists.count<3?'Drie kolonisten nodig':'Onvoldoende grondstoffen'}</button>${expedition}`);const founding=$('#pk-found-village');if(founding)founding.onclick=()=>foundNewVillage(q,r);bindScout();return;}
  if(!scouted&&o.owner!=='player'){
   modal(`<h2>🌿 ${safeText(TYPES[o.resource].resource)}oase +${o.bonus*100}%</h2><p>Terrein: ${t.name} · ${q} | ${r}</p><p>Deze oase is ontdekt. Welke dieren er leven, ontdek je pas wanneer verkenners levend terugkeren.</p>${expedition}`);bindScout();return;
  }
  const animals=Object.entries(o.animals).filter(([,n])=>n>0).map(([id,n])=>`${ANIMALS[id].icon} ${ANIMALS[id].name}: <b>${Math.ceil(n)}</b>`).join('<br>');
  const slots=(state.buildings.residence||0)>=15?3:(state.buildings.residence||0)>=10?2:(state.buildings.residence||0)>=5?1:0;
- const owned=Object.values(state.world.oases).filter(x=>x.owner==='player').length;
+ const owned=Object.values(state.world.oases).filter(x=>x.owner==='player'&&(x.ownerVillage||0)===state.activeVillageId).length;
  const g=Object.values(o.garrison||{}).reduce((a,b)=>a+b,0);
  const claim=o.cleared&&!o.owner?`<p>✅ Deze oase is vrijgemaakt. Open de <b>residentie</b> om haar te claimen (niveau 5, 10 of 15).</p><p class="subtle">⚠️ Zonder eigenaar keren de wilde dieren na 1 tot 3 uur terug. Nog maximaal ${clockTime(Math.max(0,(o.clearedAt||now())+(1+2*worldHash(o.q,o.r,778))*3600000-now()))}.</p>`:'';
  const attack=!o.cleared&&!o.owner?`<h3>⚔️ Aanvallen</h3><p class="subtle">Eenheden reizen met de langzaamste deelnemer. De uitkomst wordt bij aankomst berekend.</p>${unitInputRows(Object.keys(INFANTRY).filter(id=>!INFANTRY[id].siege),'pk-send',state.army.units)}<button class="action" id="pk-attack">Stuur aanval</button>`:'';
- const reinforce=o.owner==='player'?`<h3>🛡️ Garnizoen</h3><p>Gestationeerd: ${g} · <b>${oasisStatus(o)}</b>${g<2&&o.unprotectedSince!==null?` · ${clockTime(now()-o.unprotectedSince)} onbewaakt`:''}</p><p class="subtle">Twee soldaten beschermen deze oase volledig tegen wilde dieren.</p>${unitInputRows(Object.keys(INFANTRY).filter(id=>!INFANTRY[id].siege),'pk-send',state.army.units)}<button class="action" id="pk-reinforce">Versterking sturen</button><h3>Troepen terugroepen</h3>${unitInputRows(Object.keys(INFANTRY).filter(id=>!INFANTRY[id].siege),'pk-recall',o.garrison||{})}<button class="small-btn" id="pk-recall-units">Terugroepen</button>`:'';
+ const reinforce=o.owner==='player'&&(o.ownerVillage||0)===state.activeVillageId?`<h3>🛡️ Garnizoen</h3><p>Gestationeerd: ${g} · <b>${oasisStatus(o)}</b>${g<2&&o.unprotectedSince!==null?` · ${clockTime(now()-o.unprotectedSince)} onbewaakt`:''}</p><p class="subtle">Twee soldaten beschermen deze oase volledig tegen wilde dieren.</p>${unitInputRows(Object.keys(INFANTRY).filter(id=>!INFANTRY[id].siege),'pk-send',state.army.units)}<button class="action" id="pk-reinforce">Versterking sturen</button><h3>Troepen terugroepen</h3>${unitInputRows(Object.keys(INFANTRY).filter(id=>!INFANTRY[id].siege),'pk-recall',o.garrison||{})}<button class="small-btn" id="pk-recall-units">Terugroepen</button>`:'';
  modal(`<h2>🌿 ${safeText(TYPES[o.resource].resource)}oase +${o.bonus*100}%</h2><p>Terrein: ${t.name} · ${q} | ${r}</p><p><b>Status:</b> ${oasisStatus(o)}</p>${!o.cleared&&!o.owner?`<h3>Wilde dieren</h3><p>${animals||'Geen dieren'}</p>`:''}${claim}${attack}${reinforce}`);
  const bind=(id,cb)=>{const el=document.getElementById(id);if(el)el.onclick=cb};
  bind('pk-attack',()=>sendOasisMission(o,'attack'));bind('pk-reinforce',()=>sendOasisMission(o,'reinforce'));bind('pk-recall-units',()=>sendOasisReinforcementHome(o));
@@ -836,7 +959,7 @@ function render(){
     if(mapRedraw)mapRedraw();
   }
   document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));renderUnread();
-  document.querySelectorAll('[data-rename-village]').forEach(b=>b.addEventListener('click',showRenameVillage));
+  document.querySelectorAll('[data-village-switch]').forEach(b=>b.addEventListener('click',showVillageSwitcher));
   document.querySelectorAll('[data-field]').forEach(b=>b.addEventListener('click',()=>showField(+b.dataset.field)));
   document.querySelectorAll('[data-open-village]').forEach(b=>b.addEventListener('click',()=>{screen='village';render()}));
   document.querySelectorAll('[data-building]').forEach(b=>b.addEventListener('click',()=>showBuilding(b.dataset.building)));
@@ -976,12 +1099,22 @@ function showBuilding(id){
     }
   }
   if(id==='residence'){
-    const current=Object.values(state.world.oases||{}).filter(o=>o.owner==='player').length;
+    const current=Object.values(state.world.oases||{}).filter(o=>o.owner==='player'&&(o.ownerVillage||0)===state.activeVillageId).length;
     const limit=level>=15?3:level>=10?2:level>=5?1:0;
     const free=Object.values(state.world.oases||{}).filter(o=>o.cleared&&!o.owner&&state.world.discovered.includes(oasisKey(o.q,o.r)));
     const panel=`<section class="pk-residence-oases"><hr><h3>🌿 Oasebeheer</h3><p>Geclaimde oases: <b>${current}/${limit}</b> · niveaus 5 / 10 / 15 geven 1 / 2 / 3 plaatsen.</p>${free.length?free.map(o=>`<div class="pk-report-item"><b>${TYPES[o.resource].resource}oase +${o.bonus*100}% (${o.q} | ${o.r})</b><button class="action" data-residence-claim="${oasisKey(o.q,o.r)}" ${current>=limit?'disabled':''}>Oase claimen</button></div>`).join(''):'<p class="subtle">Er zijn nog geen vrijgemaakte oases beschikbaar.</p>'}</section>`;
     $('#modal').insertAdjacentHTML('beforeend',panel);
     document.querySelectorAll('[data-residence-claim]').forEach(b=>b.onclick=()=>{const o=state.world.oases[b.dataset.residenceClaim];claimOasis(o);showBuilding('residence');});
+  }
+  if(id==='residence'){
+    const c=state.colonists,slotLimit=residenceSlots(),remaining=slotLimit-c.usedSlots;
+    const travel=state.world.colonyMissions.filter(m=>m.originVillage===state.activeVillageId).length;
+    const panel=document.createElement('section');panel.className='pk-unit-card';
+    panel.innerHTML=`<hr><h3>🏡 Kolonisatie</h3><p>Vanuit dit dorp gesticht: <b>${c.usedSlots}/${slotLimit}</b> (1 plek op residentie 10; 2 op niveau 20).</p><p>Kolonisten beschikbaar: <b>${c.count}</b> · in training: <b>${c.training.length}</b> · op reis: <b>${travel*3}</b></p>${c.training.length?`<p>Volgende klaar over <strong data-timer-end="${c.training[0]}">${clockTime(c.training[0]-now())}</strong></p>`:''}<p>${state.research.done.colonist?'✅ Onderzocht in academie':'🔒 Eerst onderzoek in academie, met hoofdgebouw 15 en academie 15'}</p><p><b>Training per kolonist:</b> ${clockTime(colonistTrainMs())}</p><label>Aantal <input type="number" id="pk-colonist-count" min="1" max="50" value="1" inputmode="numeric"></label><div id="pk-colonist-cost">${costHtml(COLONIST_COST)}</div><button class="action" id="pk-train-colonist">Train kolonisten</button><p class="subtle">Voor een dorp zijn 3 kolonisten nodig, plus 2.000 van elke grondstof als definitieve stichtingskosten. Selecteer daarna een ontdekte hexagon op de wereldkaart.</p>`;
+    $('#modal').appendChild(panel);
+    const count=$('#pk-colonist-count'),btn=$('#pk-train-colonist');
+    const refresh=()=>{const n=Number(count.value),valid=Number.isSafeInteger(n)&&n>0&&n<=50,cost=COLONIST_COST.map(x=>x*(valid?n:0));$('#pk-colonist-cost').innerHTML=costHtml(cost);btn.disabled=!valid||!state.research.done.colonist||!remaining||!enough(cost);return valid?n:0;};
+    count.oninput=refresh;btn.onclick=()=>{update();const n=refresh(),cost=COLONIST_COST.map(x=>x*n);if(!n||!state.research.done.colonist||residenceSlots()<=state.colonists.usedSlots||!enough(cost))return;RES.forEach((r,i)=>state.stock[r]-=cost[i]);let end=Math.max(now(),state.colonists.training.at(-1)||0);for(let i=0;i<n;i++){end+=colonistTrainMs();state.colonists.training.push(end);}save();showBuilding('residence');renderResources();};refresh();
   }
   if(id==='rally'){$('#modal').insertAdjacentHTML('beforeend',scoutingHtml());const recall=$('#recallScout');if(recall)recall.onclick=recallScout;bindTroopDetails();const reports=$('#pk-open-reports');if(reports)reports.onclick=showReports;}
   if(id==='academy'&&level>=1){
@@ -1004,6 +1137,12 @@ function showBuilding(id){
         save();showBuilding('academy');renderResources();
       };
     });
+  }
+  if(id==='academy'&&level>=1){
+    initResearch();
+    const can=colonistPrerequisites(),done=!!state.research.done.colonist,running=state.research.queue?.type==='colonist';
+    $('#modal').insertAdjacentHTML('beforeend',`<section class="pk-unit-card"><hr><h3>🏡 Kolonisten ontwikkelen</h3><p>Vereist: hoofdgebouw 15 · academie 15 · residentie 10.</p><p>${done?'✅ Onderzocht':running?'⏳ Onderzoek loopt':can?'🔓 Beschikbaar':'🔒 Vereisten ontbreken'}</p>${running?`<p>Resterend: <strong data-timer-end="${state.research.queue.end}">${clockTime(state.research.queue.end-now())}</strong></p>`:done?'':`<p>Onderzoekstijd: ${clockTime(researchDuration(7200000))}</p>${costHtml(COLONIST_RESEARCH_COST)}<button class="action" id="pk-colonist-research" ${!can||!!state.research.queue||!!state.army.mountedResearch.queue||!enough(COLONIST_RESEARCH_COST)?'disabled':''}>Onderzoek kolonisten</button>`}</section>`);
+    const b=$('#pk-colonist-research');if(b)b.onclick=()=>{update();if(!colonistPrerequisites()||state.research.queue||state.army.mountedResearch.queue||!enough(COLONIST_RESEARCH_COST))return;RES.forEach((r,i)=>state.stock[r]-=COLONIST_RESEARCH_COST[i]);const t=now();state.research.queue={type:'colonist',start:t,end:t+researchDuration(7200000)};save();showBuilding('academy');renderResources();};
   }
   if(id==='academy'&&level>=5){
    const d=HORSE_SCOUT,research=state.army.mountedResearch;
@@ -1153,7 +1292,7 @@ async function pkImportBackup(file){
     try{
       localStorage.setItem(KEY,JSON.stringify(incoming));
     }catch(err){if(previous!==null)try{localStorage.setItem(KEY,previous)}catch{};throw err;}
-    state=incoming;
+    state=incoming;initVillageSystem();initScouts();initResearch();initSmithyResearch();
     closeModal();render();alert('Spelstand succesvol geïmporteerd. Je kunt nu verder spelen.');
   }catch(err){if(feedback)feedback.textContent='Importeren mislukt: '+err.message;else alert('Importeren mislukt: '+err.message);}
 }
@@ -1207,7 +1346,7 @@ function pkShowSettings(){
 document.getElementById('pk-settings-btn').onclick=pkShowSettings;
 
 $('#helpBtn').onclick=()=>modal(`<h2>📜 Welkom in Project Kingdom!</h2><p>Dit is ons eerste speelbare prototype. Je begint met 200 van elke grondstof, produceert 25 per uur en hebt standaard maximaal 600 opslagruimte per grondstof.</p><p>Open <b>Velden</b>, tik op een stuk land en koop een upgrade. Na de bouwtijd stijgt de productie. Ook als je deze pagina sluit, verstrijkt de tijd gewoon.</p><p>Bij <b>Dorp</b> kun je gebouwen bouwen, plaatsen of verbeteren. Pakhuis en graanschuur verhogen je opslag vanaf niveau 1 naar 800. De marktplaats ontgrendel je met hoofdgebouw niveau 3. De kazerne ontgrendel je met hoofdgebouw niveau 3 en verzamelplaats niveau 1. De smederij en academie ontgrendel je met hoofdgebouw niveau 5 en kazerne niveau 3. Hoofdgebouw, verzamelplaats en muur hebben een vaste plek.</p><p class="subtle">Tip: op een iPhone kun je via Safari → Deel → Zet op beginscherm een snelkoppeling toevoegen zodra de game online staat.</p><button class="small-btn" id="resetBtn">Begin opnieuw (verwijder spelstand)</button>`);
-document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();save();closeModal();render()}});
+document.addEventListener('click',e=>{if(e.target.id==='resetBtn'&&confirm('Weet je zeker dat je opnieuw wilt beginnen?')){state=initial();initVillageSystem();initScouts();initResearch();initSmithyResearch();save();closeModal();render()}});
 $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal()});
 document.querySelectorAll('.bottom button').forEach(b=>b.onclick=()=>{if(b.dataset.screen==='messages'){showReports();return;}screen=b.dataset.screen;resourceOpen=null;closeModal();render()});
 render();
